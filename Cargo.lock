@@ -2110,12 +2110,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "simple-easing"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "832ddd7df0d98d6fd93b973c330b7c8e0742d5cb8f1afc7dea89dba4d2531aa1"
-
-[[package]]
 name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2237,15 +2231,14 @@ dependencies = [
 
 [[package]]
 name = "tachyonfx"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c849d35ad6c0c08124c757282b7c771ff2efc58f7e211cb7e45a37a5f9a66f8a"
+checksum = "d3dedefbe821bfb069724fcb468962681e8d03413f56ff24ae0400d2f1f04d15"
 dependencies = [
  "anpa",
  "bon",
  "compact_str 0.9.0",
  "ratatui",
- "simple-easing",
  "thiserror 2.0.17",
  "unicode-width 0.2.0",
 ]
