@@ -3,9 +3,9 @@ use std::{path::PathBuf, process::exit};
 use clap::Parser;
 
 use crate::{
-    app_init::{initialize_app, AppComponents},
+    app_init::{AppComponents, initialize_app},
     config::default_config_path,
-    glim_app::GlimConfig,
+    glom_app::GlomConfig,
     rendering::render_main_ui,
     result::Result,
 };
@@ -17,7 +17,7 @@ mod dispatcher;
 mod domain;
 mod effect_registry;
 mod event;
-mod glim_app;
+mod glom_app;
 mod gruvbox;
 mod id;
 mod input;
@@ -30,7 +30,7 @@ mod theme;
 mod tui;
 mod ui;
 
-/// A TUI for monitoring GitLab CI/CD pipelines and projects
+/// A TUI for monitoring GitHub CI/CD pipelines and projects
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
@@ -51,18 +51,18 @@ fn main() -> Result<()> {
         exit(0);
     }
 
-    let debug = std::env::var("GLIM_DEBUG").is_ok();
+    let debug = std::env::var("GLOM_DEBUG").is_ok();
 
     let config = if config_path.exists() {
         confy::load_path(&config_path)
-            .map_err(|e| crate::result::GlimError::config_load_error(config_path.clone(), e))?
+            .map_err(|e| crate::result::GlomError::config_load_error(config_path.clone(), e))?
     } else {
-        GlimConfig::default()
+        GlomConfig::default()
     };
 
     // Create a shared runtime for async operations
     let rt = tokio::runtime::Runtime::new().map_err(|e| {
-        crate::result::GlimError::GeneralError(format!("Failed to create runtime: {e}").into())
+        crate::result::GlomError::GeneralError(format!("Failed to create runtime: {e}").into())
     })?;
 
     let AppComponents {
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
     // Start the poller in the background
     rt.spawn(async move {
         if let Err(e) = poller.start().await {
-            tracing::error!("GitLab poller failed: {}", e);
+            tracing::error!("GitHub poller failed: {}", e);
         }
     });
 

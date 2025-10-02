@@ -1,9 +1,9 @@
-//! Core HTTP client for GitLab API
+//! Core HTTP client for GitHub API
 
 use std::sync::RwLock;
 
 use chrono::Local;
-use compact_str::{format_compact, CompactString};
+use compact_str::{CompactString, format_compact};
 use reqwest::{Client, RequestBuilder, Response};
 use serde::Deserialize;
 use tracing::{debug, instrument, warn};
@@ -13,30 +13,34 @@ use super::{
     error::{ClientError, Result},
 };
 use crate::{
-    domain::{JobDto, PipelineDto, ProjectDto},
+    domain::{
+        ContributorDto, GitHubArtifactsResponse, GitHubJobsResponse, GitHubSearchResponse,
+        GitHubWorkflowRunsResponse, JobDto, PipelineDto, ProjectDto, RepositoryDetailsDto,
+        StatisticsDto,
+    },
     id::{JobId, PipelineId, ProjectId},
 };
 
-/// Pure HTTP client for GitLab API
+/// Pure HTTP client for GitHub API
 #[derive(Debug)]
-pub struct GitlabApi {
+pub struct GithubApi {
     client: RwLock<Client>,
     config: RwLock<ClientConfig>,
 }
 
-/// GitLab API error response formats
+/// GitHub API error response formats
 #[derive(Debug, Deserialize)]
-struct GitlabApiError {
+struct GithubApiError {
     error: CompactString,
     error_description: Option<CompactString>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GitlabApiError2 {
+struct GithubApiError2 {
     message: CompactString,
 }
 
-impl GitlabApi {
+impl GithubApi {
     pub fn force_new(config: ClientConfig) -> Result<Self> {
         let client = Client::builder()
             .timeout(config.request.timeout)
@@ -49,11 +53,20 @@ impl GitlabApi {
         })
     }
 
-    /// Get projects from GitLab API
+    /// Get projects from GitHub API
     #[instrument(skip(self), fields(per_page = %query.per_page))]
     pub async fn get_projects(&self, query: &ProjectQuery) -> Result<Vec<ProjectDto>> {
         let url = self.build_projects_url(query);
-        self.get_json(&url).await
+
+        if query.search_filter.is_none() {
+            // Direct user repos API returns array of repositories
+            let repos: Vec<ProjectDto> = self.get_json(&url).await?;
+            Ok(repos)
+        } else {
+            // Search API returns wrapped response
+            let response: GitHubSearchResponse<ProjectDto> = self.get_json(&url).await?;
+            Ok(response.items)
+        }
     }
 
     /// Get pipelines for a project
@@ -63,46 +76,43 @@ impl GitlabApi {
         project_id: ProjectId,
         query: &PipelineQuery,
     ) -> Result<Vec<PipelineDto>> {
-        let url = self.build_pipelines_url(project_id, query);
-        self.get_json(&url).await
+        let url = self.build_pipelines_url(project_id.clone(), query);
+        let mut response: GitHubWorkflowRunsResponse = self.get_json(&url).await?;
+
+        // Set project_id for each workflow run since GitHub doesn't include it
+        for pipeline in &mut response.workflow_runs {
+            pipeline.project_id = project_id.clone();
+        }
+
+        Ok(response.workflow_runs)
     }
 
-    /// Get jobs for a pipeline
+    /// Get jobs for a workflow run
     #[instrument(skip(self), fields(project_id = %project_id, pipeline_id = %pipeline_id))]
     pub async fn get_jobs(
         &self,
         project_id: ProjectId,
         pipeline_id: PipelineId,
     ) -> Result<Vec<JobDto>> {
-        let base_url = {
+        let url = {
             let config = self.config.read().unwrap();
+            // For GitHub, project_id should represent repo path "owner/repo"
             format_compact!(
-                "{}/projects/{}/pipelines/{}",
+                "{}/repos/{}/actions/runs/{}/jobs",
                 config.base_url,
                 project_id,
                 pipeline_id
             )
         };
 
-        // Fetch both regular jobs and trigger jobs concurrently
-        let jobs_url = format_compact!("{}/jobs", base_url);
-        let bridges_url = format_compact!("{}/bridges", base_url);
-
-        let (jobs_result, bridges_result) = tokio::try_join!(
-            self.get_json::<Vec<JobDto>>(&jobs_url),
-            self.get_json::<Vec<JobDto>>(&bridges_url)
-        )?;
-
-        // Combine and sort by ID
-        let mut all_jobs = jobs_result;
-        all_jobs.extend(bridges_result);
-        all_jobs.sort_by_key(|job| job.id);
-
-        debug!(job_count = all_jobs.len(), "Successfully fetched jobs");
-        Ok(all_jobs)
+        let response: GitHubJobsResponse = self.get_json(&url).await?;
+        let mut jobs = response.jobs;
+        jobs.sort_by_key(|job| job.id);
+        debug!(job_count = jobs.len(), "Successfully fetched jobs");
+        Ok(jobs)
     }
 
-    /// Get job trace/log
+    /// Get job logs
     #[instrument(skip(self), fields(project_id = %project_id, job_id = %job_id))]
     pub async fn get_job_trace(
         &self,
@@ -112,7 +122,7 @@ impl GitlabApi {
         let url = {
             let config = self.config.read().unwrap();
             format_compact!(
-                "{}/projects/{}/jobs/{}/trace",
+                "{}/repos/{}/actions/jobs/{}/logs",
                 config.base_url,
                 project_id,
                 job_id
@@ -124,17 +134,153 @@ impl GitlabApi {
         Ok(body.into())
     }
 
+    /// Get repository statistics (size, commit count, etc.)
+    #[instrument(skip(self), fields(project_id = %project_id))]
+    pub async fn get_repository_statistics(&self, project_id: ProjectId) -> Result<StatisticsDto> {
+        let repo_url = {
+            let config = self.config.read().unwrap();
+            format_compact!("{}/repos/{}", config.base_url, project_id)
+        };
+
+        let repo_details: RepositoryDetailsDto = self.get_json(&repo_url).await?;
+
+        let commit_count = self
+            .get_commit_count(project_id.clone())
+            .await
+            .unwrap_or(0);
+
+        let artifacts_size = self
+            .get_total_artifacts_size(project_id.clone())
+            .await
+            .unwrap_or(0);
+
+        Ok(StatisticsDto {
+            commit_count,
+            repository_size: repo_details.size * 1024, // GitHub returns size in KB
+            job_artifacts_size: artifacts_size,
+        })
+    }
+
+    /// Get total size of all artifacts across workflow runs
+    async fn get_total_artifacts_size(&self, project_id: ProjectId) -> Result<u64> {
+        let url = {
+            let config = self.config.read().unwrap();
+            format_compact!(
+                "{}/repos/{}/actions/artifacts?per_page=100",
+                config.base_url,
+                project_id
+            )
+        };
+
+        match self
+            .get_json::<GitHubArtifactsResponse>(&url)
+            .await
+        {
+            Ok(response) => {
+                let total_size: u64 = response
+                    .artifacts
+                    .iter()
+                    .map(|a| a.size_in_bytes)
+                    .sum();
+                debug!(
+                    project_id = %project_id,
+                    artifact_count = response.artifacts.len(),
+                    total_size = total_size,
+                    "Successfully fetched artifacts"
+                );
+                Ok(total_size)
+            },
+            Err(e) => {
+                debug!(
+                    project_id = %project_id,
+                    error = %e,
+                    "Failed to fetch artifacts, returning 0"
+                );
+                Ok(0)
+            },
+        }
+    }
+
+    /// Get commit count using GitHub's contributors API
+    async fn get_commit_count(&self, project_id: ProjectId) -> Result<u32> {
+        let url = {
+            let config = self.config.read().unwrap();
+            format_compact!(
+                "{}/repos/{}/contributors?per_page=100",
+                config.base_url,
+                project_id
+            )
+        };
+
+        match self.get_json::<Vec<ContributorDto>>(&url).await {
+            Ok(contributors) => {
+                let total_commits: u32 = contributors.iter().map(|c| c.contributions).sum();
+                debug!(
+                    project_id = %project_id,
+                    contributor_count = contributors.len(),
+                    total_commits = total_commits,
+                    "Successfully fetched commit count from contributors API"
+                );
+                Ok(total_commits)
+            },
+            Err(e) => {
+                debug!(
+                    project_id = %project_id,
+                    error = %e,
+                    "Failed to fetch contributors, trying fallback method"
+                );
+                self.get_commit_count_fallback(project_id).await
+            },
+        }
+    }
+
+    /// Fallback method to estimate commit count from recent commits
+    async fn get_commit_count_fallback(&self, project_id: ProjectId) -> Result<u32> {
+        let url = {
+            let config = self.config.read().unwrap();
+            format_compact!(
+                "{}/repos/{}/commits?per_page=100",
+                config.base_url,
+                project_id
+            )
+        };
+
+        match self
+            .get_json::<Vec<serde_json::Value>>(&url)
+            .await
+        {
+            Ok(commits) => {
+                // This gives us at least the count of recent commits
+                // For repositories with more than 100 commits, this will be an underestimate
+                // but it's better than 0
+                let commit_count = commits.len() as u32;
+                debug!(
+                    project_id = %project_id,
+                    commit_count = commit_count,
+                    "Fallback: fetched recent commits count"
+                );
+                Ok(commit_count)
+            },
+            Err(e) => {
+                debug!(
+                    project_id = %project_id,
+                    error = %e,
+                    "Fallback method failed, returning 0"
+                );
+                Ok(0)
+            },
+        }
+    }
+
     /// Update configuration
     pub fn update_config(&self, config: ClientConfig) -> Result<()> {
         config.validate()?;
 
-        // Create new client with updated timeout
         let client = Client::builder()
             .timeout(config.request.timeout)
             .build()
             .map_err(ClientError::Http)?;
 
-        // Update both config and client atomically
         *self.config.write().unwrap() = config;
         *self.client.write().unwrap() = client;
 
@@ -153,8 +299,6 @@ impl GitlabApi {
             .unwrap_or(false)
     }
 
-    // Private helper methods
-
     /// Perform authenticated GET request and deserialize JSON response
     async fn get_json<T>(&self, url: &str) -> Result<T>
     where
@@ -170,7 +314,9 @@ impl GitlabApi {
         let private_token = self.config.read().unwrap().private_token.clone();
         client
             .get(url)
-            .header("PRIVATE-TOKEN", private_token.as_str())
+            .header("Authorization", format!("token {}", private_token))
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "glom-github-client")
     }
 
     /// Handle HTTP response and deserialize JSON
@@ -191,60 +337,72 @@ impl GitlabApi {
         }
 
         if status.is_success() {
-            serde_json::from_str(&body)
-                .map_err(|e| ClientError::json_parse(url_path, "Failed to parse response", e))
+            serde_json::from_str(&body).map_err(|e| {
+                // Log the problematic JSON for debugging
+                eprintln!("JSON Parse Error for {}: {}", url_path, e);
+                eprintln!("Response body: {}", body);
+                ClientError::json_parse(url_path, "Failed to parse response", e)
+            })
         } else {
             self.handle_error_response(status.as_u16(), &body)
         }
     }
 
-    /// Handle error responses from GitLab API
+    /// Handle error responses from GitHub API
     fn handle_error_response<T>(&self, status: u16, body: &str) -> Result<T> {
         match status {
             401 => {
-                // Try to parse GitLab API error to distinguish between invalid and expired tokens
-                if let Ok(api_error) = serde_json::from_str::<GitlabApiError>(body) {
+                // Try to parse GitHub API error to distinguish between invalid and expired tokens
+                if let Ok(api_error) = serde_json::from_str::<GithubApiError>(body) {
                     match api_error.error.as_str() {
                         "invalid_token" => Err(ClientError::InvalidToken),
                         "expired_token" => Err(ClientError::ExpiredToken),
                         _ => {
                             // Check error description for expiration indicators
-                            if let Some(description) = &api_error.error_description {
-                                if description.contains("expired") || description.contains("expiry")
-                                {
-                                    return Err(ClientError::ExpiredToken);
-                                }
+                            if let Some(description) = &api_error.error_description
+                                && (description.contains("expired")
+                                    || description.contains("expiry"))
+                            {
+                                return Err(ClientError::ExpiredToken);
                             }
                             Err(ClientError::Authentication)
                         },
                     }
                 } else {
-                    // Fallback to generic authentication error
                     Err(ClientError::Authentication)
                 }
             },
             404 => Err(ClientError::not_found("Resource")),
-            429 => {
-                // Try to extract retry-after header info if available
-                Err(ClientError::rate_limit(None))
+            422 => {
+                if let Ok(api_error) = serde_json::from_str::<GithubApiError2>(body) {
+                    Err(ClientError::github_api(format_compact!(
+                        "Validation Failed: {}",
+                        api_error.message
+                    )))
+                } else {
+                    Err(ClientError::github_api(format_compact!(
+                        "Validation Failed: {}",
+                        body
+                    )))
+                }
             },
+            429 => Err(ClientError::rate_limit(None)),
             _ => {
-                // Try to parse GitLab API error formats
-                if let Ok(api_error) = serde_json::from_str::<GitlabApiError>(body) {
-                    Err(ClientError::gitlab_api(format_compact!(
+                if let Ok(api_error) = serde_json::from_str::<GithubApiError>(body) {
+                    Err(ClientError::github_api(format_compact!(
                         "HTTP {}: {} {}",
                         status,
                         api_error.error,
                         api_error.error_description.unwrap_or_default()
                     )))
-                } else if let Ok(api_error2) = serde_json::from_str::<GitlabApiError2>(body) {
-                    Err(ClientError::gitlab_api(format_compact!(
+                } else if let Ok(api_error2) = serde_json::from_str::<GithubApiError2>(body) {
+                    Err(ClientError::github_api(format_compact!(
                         "HTTP {}: {}",
                         status,
                         api_error2.message
                     )))
                 } else {
-                    Err(ClientError::gitlab_api(format_compact!(
+                    Err(ClientError::github_api(format_compact!(
                         "HTTP {}: {}",
                         status,
                         body
@@ -254,47 +412,37 @@ impl GitlabApi {
         }
     }
 
-    /// Build URL for projects endpoint
+    /// Build URL for repositories search/list endpoint
     fn build_projects_url(&self, query: &ProjectQuery) -> CompactString {
         let config = self.config.read().unwrap();
-        let mut url = format_compact!("{}/projects?", config.base_url);
 
-        // Add query parameters
-        url.push_str("search_namespaces=true");
+        if query.search_filter.is_none() {
+            format_compact!(
+                "{}/user/repos?type=all&sort=updated&direction=desc&per_page={}",
+                config.base_url,
+                query.per_page
+            )
+        } else {
+            let mut url = format_compact!("{}/search/repositories?q=", config.base_url);
 
-        if let Some(filter) = &query.search_filter {
-            url.push_str(&format_compact!("&search={}", filter));
+            if let Some(filter) = &query.search_filter {
+                url.push_str(&format_compact!("{}", filter));
+            }
+
+            url.push_str(" user:@me");
+
+            url.push_str("&sort=updated&order=desc");
+            url.push_str(&format_compact!("&per_page={}", query.per_page));
+
+            url
         }
-
-        if let Some(updated_after) = query.updated_after {
-            url.push_str(&format_compact!(
-                "&last_activity_after={}",
-                updated_after.to_rfc3339()
-            ));
-        }
-
-        if query.include_statistics {
-            url.push_str("&statistics=true");
-        }
-
-        if !query.archived {
-            url.push_str("&archived=false");
-        }
-
-        if query.membership {
-            url.push_str("&membership=true");
-        }
-
-        url.push_str(&format_compact!("&per_page={}", query.per_page));
-
-        url
     }
 
-    /// Build URL for pipelines endpoint
+    /// Build URL for workflow runs endpoint
     fn build_pipelines_url(&self, project_id: ProjectId, query: &PipelineQuery) -> CompactString {
         let config = self.config.read().unwrap();
         let mut url = format_compact!(
-            "{}/projects/{}/pipelines?per_page={}",
+            "{}/repos/{}/actions/runs?per_page={}",
             config.base_url,
             project_id,
             query.per_page
@@ -302,8 +450,8 @@ impl GitlabApi {
 
         if let Some(updated_after) = query.updated_after {
             url.push_str(&format_compact!(
-                "&updated_after={}",
-                updated_after.to_rfc3339()
+                "&created=>={}",
+                updated_after.format("%Y-%m-%dT%H:%M:%SZ")
             ));
         }
 
@@ -313,11 +461,11 @@ impl GitlabApi {
     /// Log HTTP response to file for debugging
     fn log_response_to_file(&self, path: &str, body: &str, config: &ClientConfig) {
         if let Some(log_dir) = &config.debug.log_directory {
-            if !log_dir.exists() {
-                if let Err(e) = std::fs::create_dir_all(log_dir) {
-                    warn!("Failed to create log directory: {}", e);
-                    return;
-                }
+            if !log_dir.exists()
+                && let Err(e) = std::fs::create_dir_all(log_dir)
+            {
+                warn!("Failed to create log directory: {}", e);
+                return;
             }
 
             let filename = format!(
@@ -343,8 +491,8 @@ mod tests {
 
     use super::*;
 
-    impl GitlabApi {
-        /// Create a new GitLab API client
+    impl GithubApi {
+        /// Create a new GitHub API client
         pub fn new(config: ClientConfig) -> Result<Self> {
             config.validate()?;
 
@@ -361,13 +509,16 @@ mod tests {
     }
 
     fn test_config() -> ClientConfig {
-        ClientConfig::new("https://gitlab.example.com", "test-token")
+        ClientConfig::new(
+            "https://api.github.com",
+            "ghp_1234567890123456789012345678901234567890",
+        )
     }
 
     #[test]
     fn test_api_creation() {
         let config = test_config();
-        let api = GitlabApi::new(config.clone());
+        let api = GithubApi::new(config.clone());
         assert!(api.is_ok());
 
         let api = api.unwrap();
@@ -378,16 +529,19 @@ mod tests {
     #[test]
     fn test_api_creation_invalid_config() {
         let config = ClientConfig::new("", "test-token");
-        let api = GitlabApi::new(config);
+        let api = GithubApi::new(config);
         assert!(api.is_err());
     }
 
     #[test]
     fn test_config_update() {
         let config = test_config();
-        let api = GitlabApi::new(config).unwrap();
+        let api = GithubApi::new(config).unwrap();
 
-        let new_config = ClientConfig::new("https://gitlab.new.com", "new-token");
+        let new_config = ClientConfig::new(
+            "https://api.github.com",
+            "ghp_9876543210987654321098765432109876543210",
+        );
         assert!(api.update_config(new_config.clone()).is_ok());
 
         let updated_config = api.config();
@@ -396,9 +550,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_projects_url() {
+    fn test_build_projects_url_with_filter() {
         let config = test_config().with_search_filter(Some("frontend".into()));
-        let api = GitlabApi::new(config).unwrap();
+        let api = GithubApi::new(config).unwrap();
 
         let mut query = ProjectQuery::default()
             .with_search_filter(Some("frontend".into()))
@@ -409,37 +563,53 @@ mod tests {
 
         let url = api.build_projects_url(&query);
 
-        assert!(url.contains("https://gitlab.example.com/projects?"));
-        assert!(url.contains("search_namespaces=true"));
-        assert!(url.contains("search=frontend"));
+        // With a search filter, it should use the search API
+        assert!(url.contains("https://api.github.com/search/repositories?"));
+        assert!(url.contains("q=frontend"));
+        assert!(url.contains("user:@me"));
         assert!(url.contains("per_page=50"));
-        assert!(url.contains("statistics=true"));
-        assert!(url.contains("archived=false"));
-        assert!(url.contains("membership=true"));
+        assert!(url.contains("sort=updated&order=desc"));
+    }
+
+    #[test]
+    fn test_build_projects_url_without_filter() {
+        let config = test_config();
+        let api = GithubApi::new(config).unwrap();
+
+        let query = ProjectQuery::default().with_per_page(50);
+
+        let url = api.build_projects_url(&query);
+
+        // Without a search filter, it should use the user repos API
+        assert!(url.contains("https://api.github.com/user/repos?"));
+        assert!(url.contains("type=all"));
+        assert!(url.contains("sort=updated"));
+        assert!(url.contains("direction=desc"));
+        assert!(url.contains("per_page=50"));
     }
 
     #[test]
     fn test_build_pipelines_url() {
         let config = test_config();
-        let api = GitlabApi::new(config).unwrap();
+        let api = GithubApi::new(config).unwrap();
 
-        let project_id = ProjectId::new(123);
+        let project_id = ProjectId::new("owner/repo");
         let query = PipelineQuery::new().with_per_page(60);
 
         let url = api.build_pipelines_url(project_id, &query);
 
         assert_eq!(
             url,
-            "https://gitlab.example.com/projects/123/pipelines?per_page=60"
+            "https://api.github.com/repos/owner/repo/actions/runs?per_page=60"
         );
     }
 
     #[test]
     fn test_build_pipelines_url_with_date() {
         let config = test_config();
-        let api = GitlabApi::new(config).unwrap();
+        let api = GithubApi::new(config).unwrap();
 
-        let project_id = ProjectId::new(123);
+        let project_id = ProjectId::new("owner/repo");
         let updated_after = DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
@@ -450,12 +620,12 @@ mod tests {
 
         let url = api.build_pipelines_url(project_id, &query);
 
-        assert!(url.contains("updated_after=2023-01-01T00:00:00"));
+        assert!(url.contains("&created=>=2023-01-01T00:00:00Z"));
     }
 
     #[test]
     fn test_error_handling() {
-        let api = GitlabApi::new(test_config()).unwrap();
+        let api = GithubApi::new(test_config()).unwrap();
 
         // Test authentication error
         let error = api.handle_error_response::<()>(401, "");

@@ -17,24 +17,25 @@ use crate::{
 ///
 /// Each pipeline is represented as a row in the table, with the following format:
 /// ```text
-/// #BRANCH| PIPELNE/JOB | TIME   | %DONE | COMMENT
-/// main   | 🔵🔵🔵🔵🔵 | 14m24s  | ~72%  | Merge branch 'renovate/all-minor-dependencies'
-///        | deploy-prod |  3m23s | ~40%  |  into 'main'
+/// #BRANCH| WORKFLOW NAME | PIPELNE/JOB | TIME   | COMMENT
+/// main   | CI/CD         | 🔵🔵🔵🔵🔵 | 14m24s | Merge branch 'renovate/all-minor-dependencies'
+///        |               | deploy-prod |  3m23s |  into 'main'
 /// ```
 #[derive(Clone)]
 pub struct PipelineTable {
-    pub constraints: [Constraint; 5],
+    pub constraints: [Constraint; 6],
     pub rows: Vec<Row<'static>>,
 }
 
 impl PipelineTable {
     pub fn new(pipelines: &[&Pipeline]) -> Self {
-        let (max_branch, max_job_name, max_failed_job_name, max_duration) =
+        let (max_branch, max_workflow_name, max_job_name, max_failed_job_name, max_duration) =
             pipelines
                 .iter()
-                .fold((5, 12, 12, 4), |(b, j, f, d), p| {
+                .fold((5, 12, 12, 12, 4), |(b, w, j, f, d), p| {
                     (
                         b.max(p.branch.chars().count()),
+                        w.max(p.name.chars().count()),
                         j.max(p.active_job_name().chars().count())
                             .max(p.jobs.clone().map(|j| j.len() * 2).unwrap_or(0)),
                         f.max(
@@ -51,6 +52,7 @@ impl PipelineTable {
             constraints: [
                 Constraint::Length(12),
                 Constraint::Length(max_branch as u16),
+                Constraint::Length(max_workflow_name as u16),
                 Constraint::Length(max_job_name.max(max_failed_job_name) as u16),
                 Constraint::Length(max_duration as u16),
                 Constraint::Percentage(100),
@@ -83,6 +85,7 @@ impl PipelineTable {
         Row::new(vec![
             Cell::from(text_from(p.created_at.with_timezone(&Local))),
             branch_cell,
+            Cell::from(Span::from(p.name.to_string()).style(theme().pipeline_name)),
             Self::pipeline_jobs_cell(p),
             Self::pipeline_duration_cell(p),
             // Self::pipeline_percentages_cell(p),

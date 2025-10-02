@@ -7,19 +7,19 @@ use tracing::{debug, info, instrument, warn};
 use crate::{
     dispatcher::Dispatcher,
     domain::{Job, Pipeline, Project},
-    event::GlimEvent,
+    event::GlomEvent,
     id::ProjectId,
 };
 
 pub struct ProjectStore {
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     projects: Vec<Project>,
     project_id_lookup: HashMap<ProjectId, usize>,
     sorted: Vec<Project>, // todo: ref projects
 }
 
 impl ProjectStore {
-    pub fn new(sender: Sender<GlimEvent>) -> Self {
+    pub fn new(sender: Sender<GlomEvent>) -> Self {
         Self {
             sender,
             projects: Vec::new(),
@@ -30,21 +30,39 @@ impl ProjectStore {
     }
 
     #[instrument(skip(self, event), fields(event_type = %event.variant_name()))]
-    pub fn apply(&mut self, event: &GlimEvent) {
+    pub fn apply(&mut self, event: &GlomEvent) {
         match event {
-            // requests jobs for pipelines that have not been loaded yet
-            GlimEvent::ProjectDetailsOpen(id) => {
-                debug!(project_id = %id, "Opening project details and requesting missing jobs");
-                let project = self.find(*id).unwrap();
+            // requests jobs for pipelines that have not been loaded yet and repository statistics
+            GlomEvent::ProjectDetailsOpen(id) => {
+                debug!(project_id = %id, "Opening project details and requesting missing jobs and statistics");
+                let project = self.find(id.clone()).unwrap();
+                let project_id = project.id.clone();
+
+                // Fetch jobs for pipelines that haven't been loaded yet
                 project
                     .recent_pipelines()
                     .into_iter()
                     .filter(|p| p.jobs.is_none())
-                    .for_each(|p| self.dispatch(GlimEvent::JobsFetch(project.id, p.id)));
+                    .for_each(|p| self.dispatch(GlomEvent::JobsFetch(project_id.clone(), p.id)));
+
+                // Fetch repository statistics if they haven't been loaded yet
+                if project.commit_count == 0
+                    && project.repo_size_kb == 0
+                    && project.artifacts_size_kb == 0
+                    && !project.statistics_loading
+                {
+                    // Set loading state
+                    let sender = self.sender.clone();
+                    if let Some(project_mut) = self.find_mut(project_id.clone()) {
+                        project_mut.statistics_loading = true;
+                        sender.dispatch(GlomEvent::ProjectUpdated(Box::new(project_mut.clone())));
+                    }
+                    self.dispatch(GlomEvent::ProjectStatisticsFetch(project_id));
+                }
             },
 
             // updates the projects in the store
-            GlimEvent::ProjectsLoaded(projects) => {
+            GlomEvent::ProjectsLoaded(projects) => {
                 debug!(
                     project_count = projects.len(),
                     "Processing received projects"
@@ -57,22 +75,24 @@ impl ProjectStore {
                         let project = p.clone();
                         self.sync_project(p);
                         let sender = self.sender.clone();
-                        sender.dispatch(GlimEvent::ProjectUpdated(Box::new(project)))
+                        sender.dispatch(GlomEvent::ProjectUpdated(Box::new(project)))
                     });
 
                 self.sorted = self.projects_sorted_by_last_activity();
                 if first_projects {
-                    self.dispatch(GlimEvent::ProjectSelected(self.sorted.first().unwrap().id));
+                    self.dispatch(GlomEvent::ProjectSelected(
+                        self.sorted.first().unwrap().id.clone(),
+                    ));
                 }
             },
 
             // updates the pipelines for a project
-            GlimEvent::PipelinesLoaded(pipelines) => {
-                let project_id = pipelines[0].project_id;
+            GlomEvent::PipelinesLoaded(pipelines) => {
+                let project_id = pipelines[0].project_id.clone();
                 debug!(project_id = %project_id, pipeline_count = pipelines.len(), "Processing received pipelines");
                 let sender = self.sender.clone();
 
-                if let Some(project) = self.find_mut(project_id) {
+                if let Some(project) = self.find_mut(project_id.clone()) {
                     let pipelines: Vec<Pipeline> = pipelines
                         .iter()
                         .map(|p| Pipeline::from(p.clone()))
@@ -81,16 +101,18 @@ impl ProjectStore {
                     pipelines
                         .iter()
                         .filter(|&p| p.status.is_active() || p.has_active_jobs())
-                        .for_each(|p| sender.dispatch(GlimEvent::JobsFetch(project_id, p.id)));
+                        .for_each(|p| {
+                            sender.dispatch(GlomEvent::JobsFetch(project_id.clone(), p.id))
+                        });
 
                     project.update_pipelines(pipelines);
-                    sender.dispatch(GlimEvent::ProjectUpdated(Box::new(project.clone())))
+                    sender.dispatch(GlomEvent::ProjectUpdated(Box::new(project.clone())))
                 }
 
                 self.sorted = self.projects_sorted_by_last_activity();
             },
 
-            GlimEvent::JobsLoaded(project_id, pipeline_id, job_dtos) => {
+            GlomEvent::JobsLoaded(project_id, pipeline_id, job_dtos) => {
                 debug!(project_id = %project_id, pipeline_id = %pipeline_id, job_count = job_dtos.len(), "Processing received jobs");
                 let jobs: Vec<Job> = job_dtos
                     .iter()
@@ -98,7 +120,7 @@ impl ProjectStore {
                     .collect();
 
                 let sender = self.sender.clone();
-                if let Some(project) = self.find_mut(*project_id) {
+                if let Some(project) = self.find_mut(project_id.clone()) {
                     project.update_jobs(*pipeline_id, jobs);
                     // todo: ugly, fix
                     project.update_commit(
@@ -108,25 +130,39 @@ impl ProjectStore {
                             .map(|j| j.commit.clone().into())
                             .unwrap(),
                     );
-                    sender.dispatch(GlimEvent::ProjectUpdated(Box::new(project.clone())))
+                    sender.dispatch(GlomEvent::ProjectUpdated(Box::new(project.clone())))
                 }
 
                 self.sorted = self.projects_sorted_by_last_activity();
             },
 
+            // updates project statistics when loaded
+            GlomEvent::ProjectStatisticsLoaded(project_id, statistics) => {
+                debug!(project_id = %project_id, "Processing received project statistics");
+                let sender = self.sender.clone();
+                if let Some(project) = self.find_mut(project_id.clone()) {
+                    project.commit_count = statistics.commit_count;
+                    project.repo_size_kb = statistics.repository_size / 1024; // Convert bytes to KB
+                    project.artifacts_size_kb = statistics.job_artifacts_size / 1024; // Convert bytes to KB
+                    project.statistics_loading = false; // Clear loading state
+
+                    sender.dispatch(GlomEvent::ProjectUpdated(Box::new(project.clone())));
+                }
+            },
+
             // requests pipelines for a project if they are not already loaded
-            GlimEvent::ProjectSelected(id) => {
+            GlomEvent::ProjectSelected(id) => {
                 debug!(project_id = %id, "Project selected");
                 let mut request_pipelines = false;
-                if let Some(project) = self.find_mut(*id) {
-                    if project.pipelines.is_none() {
-                        project.pipelines = Some(Vec::new());
-                        request_pipelines = true;
-                    }
+                if let Some(project) = self.find_mut(id.clone())
+                    && project.pipelines.is_none()
+                {
+                    project.pipelines = Some(Vec::new());
+                    request_pipelines = true;
                 };
 
                 if request_pipelines {
-                    self.dispatch(GlimEvent::PipelinesFetch(*id));
+                    self.dispatch(GlomEvent::PipelinesFetch(id.clone()));
                 };
             },
             _ => {},
@@ -162,16 +198,17 @@ impl ProjectStore {
     #[instrument(skip(self, project), fields(project_id = %project.id, project_path = %project.path))]
     fn sync_project(&mut self, mut project: Project) {
         let sender = self.sender.clone();
-        match self.find_mut(project.id) {
+        let project_id = project.id.clone();
+        match self.find_mut(project_id.clone()) {
             Some(existing_entry) => {
-                sender.dispatch(GlimEvent::PipelinesFetch(project.id));
+                sender.dispatch(GlomEvent::PipelinesFetch(project_id.clone()));
                 existing_entry.update_project(project.clone())
             },
             None => {
                 self.project_id_lookup
-                    .insert(project.id, self.projects.len());
+                    .insert(project_id.clone(), self.projects.len());
                 if !is_older_than_7d(project.last_activity()) {
-                    sender.dispatch(GlimEvent::PipelinesFetch(project.id));
+                    sender.dispatch(GlomEvent::PipelinesFetch(project_id));
                     project.pipelines = Some(Vec::new());
                 }
                 self.projects.push(project);
@@ -185,45 +222,53 @@ fn is_older_than_7d(date: DateTime<Utc>) -> bool {
 }
 
 #[instrument(skip(event))]
-pub fn log_event(event: &GlimEvent) {
+pub fn log_event(event: &GlomEvent) {
     match event {
-        GlimEvent::ProjectsFetch => info!("Requesting all projects from GitLab"),
-        GlimEvent::ProjectsLoaded(projects) => {
-            info!(count = projects.len(), "Received projects from GitLab API")
+        GlomEvent::ProjectsFetch => info!("Requesting all projects from GitHub"),
+        GlomEvent::ProjectsLoaded(projects) => {
+            info!(count = projects.len(), "Received projects from GitHub API")
         },
-        GlimEvent::ProjectFetch(id) => debug!(project_id = %id, "Refreshing project"),
-        GlimEvent::JobsActiveFetch => debug!("Requesting active pipelines for all projects"),
-        GlimEvent::PipelinesFetch(id) => {
+        GlomEvent::ProjectFetch(id) => debug!(project_id = %id, "Refreshing project"),
+        GlomEvent::JobsActiveFetch => debug!("Requesting active pipelines for all projects"),
+        GlomEvent::PipelinesFetch(id) => {
             debug!(project_id = %id, "Requesting pipelines for project")
         },
-        GlimEvent::JobsFetch(project_id, pipeline_id) => {
+        GlomEvent::JobsFetch(project_id, pipeline_id) => {
             debug!(project_id = %project_id, pipeline_id = %pipeline_id, "Requesting jobs")
         },
-        GlimEvent::PipelinesLoaded(pipelines) => {
-            let project_id = pipelines.first().map(|p| p.project_id);
-            debug!(count = pipelines.len(), project_id = ?project_id, "Received pipelines from GitLab API")
+        GlomEvent::PipelinesLoaded(pipelines) => {
+            let project_id = pipelines.first().map(|p| p.project_id.clone());
+            debug!(count = pipelines.len(), project_id = ?project_id, "Received pipelines from GitHub API")
         },
-        GlimEvent::JobsLoaded(project_id, pipeline_id, jobs) => {
+        GlomEvent::JobsLoaded(project_id, pipeline_id, jobs) => {
             debug!(project_id = %project_id, pipeline_id = %pipeline_id, count = jobs.len(), "Received jobs")
         },
-        GlimEvent::ProjectDetailsOpen(id) => debug!(project_id = %id, "Opening project details"),
-        GlimEvent::ProjectDetailsClose => debug!("Closing project details popup"),
-        GlimEvent::PipelineActionsOpen(project_id, pipeline_id) => {
+        GlomEvent::ProjectStatisticsFetch(project_id) => {
+            debug!(project_id = %project_id, "Requesting repository statistics")
+        },
+        GlomEvent::ProjectStatisticsLoaded(project_id, statistics) => {
+            debug!(project_id = %project_id, commit_count = statistics.commit_count,
+                   repo_size = statistics.repository_size, artifacts_size = statistics.job_artifacts_size,
+                   "Received repository statistics")
+        },
+        GlomEvent::ProjectDetailsOpen(id) => debug!(project_id = %id, "Opening project details"),
+        GlomEvent::ProjectDetailsClose => debug!("Closing project details popup"),
+        GlomEvent::PipelineActionsOpen(project_id, pipeline_id) => {
             debug!(project_id = %project_id, pipeline_id = %pipeline_id, "Opening pipeline actions")
         },
-        GlimEvent::ProjectSelected(id) => debug!(project_id = %id, "Selected project"),
-        GlimEvent::PipelineSelected(id) => debug!(pipeline_id = %id, "Selected pipeline"),
-        GlimEvent::ProjectOpenUrl(id) => info!(project_id = %id, "Opening project in browser"),
-        GlimEvent::PipelineOpenUrl(project_id, pipeline_id) => {
+        GlomEvent::ProjectSelected(id) => debug!(project_id = %id, "Selected project"),
+        GlomEvent::PipelineSelected(id) => debug!(pipeline_id = %id, "Selected pipeline"),
+        GlomEvent::ProjectOpenUrl(id) => info!(project_id = %id, "Opening project in browser"),
+        GlomEvent::PipelineOpenUrl(project_id, pipeline_id) => {
             info!(project_id = %project_id, pipeline_id = %pipeline_id, "Opening pipeline in browser")
         },
-        GlimEvent::JobOpenUrl(project_id, pipeline_id, job_id) => {
+        GlomEvent::JobOpenUrl(project_id, pipeline_id, job_id) => {
             info!(project_id = %project_id, pipeline_id = %pipeline_id, job_id = %job_id, "Opening job in browser")
         },
-        GlimEvent::JobLogFetch(project_id, pipeline_id) => {
+        GlomEvent::JobLogFetch(project_id, pipeline_id) => {
             info!(project_id = %project_id, pipeline_id = %pipeline_id, "Downloading job error log")
         },
-        GlimEvent::JobLogDownloaded(project_id, job_id, log_content) => {
+        GlomEvent::JobLogDownloaded(project_id, job_id, log_content) => {
             info!(
                 project_id = %project_id,
                 job_id = %job_id,
@@ -231,25 +276,25 @@ pub fn log_event(event: &GlimEvent) {
                 "Job log downloaded successfully"
             )
         },
-        GlimEvent::ConfigOpen => debug!("Displaying configuration"),
-        GlimEvent::ConfigApply => info!("Applying new configuration"),
-        GlimEvent::ConfigUpdate(_) => debug!("Updating configuration"),
-        GlimEvent::ApplyTemporaryFilter(filter) => {
+        GlomEvent::ConfigOpen => debug!("Displaying configuration"),
+        GlomEvent::ConfigApply => info!("Applying new configuration"),
+        GlomEvent::ConfigUpdate(_) => debug!("Updating configuration"),
+        GlomEvent::ApplyTemporaryFilter(filter) => {
             debug!(filter = ?filter, "Applying temporary filter")
         },
-        GlimEvent::FilterClear => info!("Clearing project filter"),
-        GlimEvent::FilterMenuClose => debug!("Closing filter input"),
-        GlimEvent::AppExit => info!("Application shutting down"),
-        GlimEvent::AppError(err) => {
+        GlomEvent::FilterClear => info!("Clearing project filter"),
+        GlomEvent::FilterMenuClose => debug!("Closing filter input"),
+        GlomEvent::AppExit => info!("Application shutting down"),
+        GlomEvent::AppError(err) => {
             warn!(error = %err, error_type = ?std::mem::discriminant(err), "Application error occurred")
         },
-        GlimEvent::LogEntry(_msg) => {}, // Don't log LogEntry events to prevent infinite loop
+        GlomEvent::LogEntry(_msg) => {}, // Don't log LogEntry events to prevent infinite loop
         _ => {},                         // Don't log every event
     }
 }
 
 impl Dispatcher for ProjectStore {
-    fn dispatch(&self, event: GlimEvent) {
+    fn dispatch(&self, event: GlomEvent) {
         self.sender.send(event).unwrap();
     }
 }

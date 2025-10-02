@@ -4,9 +4,9 @@ use compact_str::CompactString;
 use serde_json::error::Category;
 
 use crate::{
-    event::GlimEvent,
+    event::GlomEvent,
     id::{JobId, PipelineId, ProjectId},
-    result::GlimError,
+    result::GlomError,
 };
 
 #[derive(Debug)]
@@ -32,18 +32,18 @@ pub enum NoticeLevel {
 pub enum NoticeMessage {
     GeneralMessage(CompactString),
     #[allow(dead_code)]
-    JobLogDownloaded(ProjectId, PipelineId, JobId),
+    JobLogDownloaded(ProjectId, JobId),
     ScreenCaptured,
-    InvalidGitlabToken,
-    ExpiredGitlabToken,
+    InvalidGithubToken,
+    ExpiredGithubToken,
     ConfigError(CompactString),
     JsonDeserializeError(Category, CompactString),
     #[allow(dead_code)]
-    GitlabGetJobsError(ProjectId, PipelineId, CompactString),
+    GithubGetJobsError(ProjectId, PipelineId, CompactString),
     #[allow(dead_code)]
-    GitlabGetTriggerJobsError(ProjectId, PipelineId, CompactString),
+    GithubGetTriggerJobsError(ProjectId, PipelineId, CompactString),
     #[allow(dead_code)]
-    GitlabGetPipelinesError(ProjectId, PipelineId, CompactString),
+    GithubGetPipelinesError(ProjectId, PipelineId, CompactString),
     LogLevelChanged(tracing::Level),
 }
 
@@ -56,50 +56,50 @@ impl NoticeService {
         }
     }
 
-    pub fn apply(&mut self, event: &GlimEvent) {
+    pub fn apply(&mut self, event: &GlomEvent) {
         match event {
-            GlimEvent::AppError(e) => match e.clone() {
-                GlimError::InvalidGitlabToken => Some(NoticeMessage::InvalidGitlabToken),
-                GlimError::ExpiredGitlabToken => Some(NoticeMessage::ExpiredGitlabToken),
-                GlimError::ConfigFileNotFound { path } => Some(NoticeMessage::ConfigError(
+            GlomEvent::AppError(e) => match e.clone() {
+                GlomError::InvalidGithubToken => Some(NoticeMessage::InvalidGithubToken),
+                GlomError::ExpiredGithubToken => Some(NoticeMessage::ExpiredGithubToken),
+                GlomError::ConfigFileNotFound { path } => Some(NoticeMessage::ConfigError(
                     format!("Configuration file not found: {}", path.display()).into(),
                 )),
-                GlimError::ConfigLoadError { path, message } => Some(NoticeMessage::ConfigError(
+                GlomError::ConfigLoadError { path, message } => Some(NoticeMessage::ConfigError(
                     format!("Failed to load config from {}: {}", path.display(), message).into(),
                 )),
-                GlimError::ConfigSaveError { path, message } => Some(NoticeMessage::ConfigError(
+                GlomError::ConfigSaveError { path, message } => Some(NoticeMessage::ConfigError(
                     format!("Failed to save config to {}: {}", path.display(), message).into(),
                 )),
-                GlimError::ConfigValidationError { field, message } => Some(
+                GlomError::ConfigValidationError { field, message } => Some(
                     NoticeMessage::ConfigError(format!("Invalid {field}: {message}").into()),
                 ),
-                GlimError::ConfigConnectionError { message } => Some(NoticeMessage::ConfigError(
+                GlomError::ConfigConnectionError { message } => Some(NoticeMessage::ConfigError(
                     format!("Connection test failed: {message}").into(),
                 )),
-                GlimError::GeneralError(s) => Some(NoticeMessage::GeneralMessage(s)),
-                GlimError::JsonDeserializeError(cat, json) => {
+                GlomError::GeneralError(s) => Some(NoticeMessage::GeneralMessage(s)),
+                GlomError::JsonDeserializeError(cat, json) => {
                     Some(NoticeMessage::JsonDeserializeError(cat, json))
                 },
-                GlimError::GitlabGetJobsError(project_id, pipeline_id, s) => Some(
-                    NoticeMessage::GitlabGetJobsError(project_id, pipeline_id, s),
+                GlomError::GithubGetJobsError(project_id, pipeline_id, s) => Some(
+                    NoticeMessage::GithubGetJobsError(project_id, pipeline_id, s),
                 ),
-                GlimError::GitlabGetTriggerJobsError(project_id, pipeline_id, s) => Some(
-                    NoticeMessage::GitlabGetTriggerJobsError(project_id, pipeline_id, s),
+                GlomError::GithubGetTriggerJobsError(project_id, pipeline_id, s) => Some(
+                    NoticeMessage::GithubGetTriggerJobsError(project_id, pipeline_id, s),
                 ),
-                GlimError::GitlabGetPipelinesError(project_id, pipeline_id, s) => Some(
-                    NoticeMessage::GitlabGetPipelinesError(project_id, pipeline_id, s),
+                GlomError::GithubGetPipelinesError(project_id, pipeline_id, s) => Some(
+                    NoticeMessage::GithubGetPipelinesError(project_id, pipeline_id, s),
                 ),
             }
             .map(|m| self.push_notice(NoticeLevel::Error, m))
             .unwrap_or(()),
-            GlimEvent::JobLogDownloaded(_project_id, _job_id, _) => self.push_notice(
+            GlomEvent::JobLogDownloaded(_project_id, _job_id, _) => self.push_notice(
                 NoticeLevel::Info,
                 NoticeMessage::GeneralMessage("Job log downloaded".into()),
             ),
-            GlimEvent::ScreenCaptureToClipboard(_) => {
+            GlomEvent::ScreenCaptureToClipboard(_) => {
                 self.push_notice(NoticeLevel::Info, NoticeMessage::ScreenCaptured)
             },
-            GlimEvent::LogLevelChanged(new_level) => self.push_notice(
+            GlomEvent::LogLevelChanged(new_level) => self.push_notice(
                 NoticeLevel::Info,
                 NoticeMessage::LogLevelChanged(*new_level),
             ),

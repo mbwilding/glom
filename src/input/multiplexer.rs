@@ -1,21 +1,21 @@
 use std::sync::mpsc::Sender;
 
 use crate::{
-    event::GlimEvent,
+    event::GlomEvent,
     input::{
-        processor::{ConfigProcessor, PipelineActionsProcessor, ProjectDetailsProcessor},
         InputProcessor,
+        processor::{ConfigProcessor, PipelineActionsProcessor, ProjectDetailsProcessor},
     },
     ui::StatefulWidgets,
 };
 
 pub struct InputMultiplexer {
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     processors: Vec<Box<dyn InputProcessor>>,
 }
 
 impl InputMultiplexer {
-    pub fn new(sender: Sender<GlimEvent>) -> Self {
+    pub fn new(sender: Sender<GlomEvent>) -> Self {
         Self { sender, processors: Vec::new() }
     }
 
@@ -33,28 +33,28 @@ impl InputMultiplexer {
         self.processors.pop();
     }
 
-    pub fn apply(&mut self, event: &GlimEvent, ui: &mut StatefulWidgets) {
+    pub fn apply(&mut self, event: &GlomEvent, ui: &mut StatefulWidgets) {
         match event {
             // project details popup
-            GlimEvent::ProjectDetailsOpen(id) => {
+            GlomEvent::ProjectDetailsOpen(id) => {
                 self.push(Box::new(ProjectDetailsProcessor::new(
                     self.sender.clone(),
-                    *id,
+                    id.clone(),
                 )));
             },
-            GlimEvent::ProjectDetailsClose => self.pop_processor(),
+            GlomEvent::ProjectDetailsClose => self.pop_processor(),
 
             // pipeline actions popup
-            GlimEvent::PipelineActionsOpen(_, _) => {
+            GlomEvent::PipelineActionsOpen(_, _) => {
                 self.push(Box::new(PipelineActionsProcessor::new(self.sender.clone())));
             },
-            GlimEvent::PipelineActionsClose => self.pop_processor(),
+            GlomEvent::PipelineActionsClose => self.pop_processor(),
 
             // config
-            GlimEvent::ConfigOpen => {
+            GlomEvent::ConfigOpen => {
                 self.push(Box::new(ConfigProcessor::new(self.sender.clone())));
             },
-            GlimEvent::ConfigClose => self.pop_processor(),
+            GlomEvent::ConfigClose => self.pop_processor(),
 
             _ => (),
         }

@@ -11,7 +11,7 @@ use tachyonfx::RefRect;
 use tui_input::Input;
 
 use crate::{
-    glim_app::GlimConfig,
+    glom_app::GlomConfig,
     logging::LoggingConfig,
     theme::theme,
     ui::{fx::popup_window, popup::utility::CenteredShrink, widget::InputField},
@@ -36,7 +36,7 @@ impl ConfigPopup {
 }
 
 impl ConfigPopupState {
-    pub fn new(config: GlimConfig, popup_area: RefRect) -> Self {
+    pub fn new(config: GlomConfig, popup_area: RefRect) -> Self {
         let log_level_options = vec!["Trace", "Debug", "Info", "Warn", "Error"];
 
         let current_log_level = config
@@ -82,14 +82,14 @@ impl ConfigPopupState {
             error_message: None,
             input_fields: vec![
                 InputField::builder()
-                    .label("gitlab url")
+                    .label("github url")
                     .description(Some(url_description()))
-                    .input(Input::new(config.gitlab_url.to_string()))
+                    .input(Input::new(config.github_url.to_string()))
                     .into(),
                 InputField::builder()
-                    .label("gitlab token")
+                    .label("github token")
                     .description(Some(token_description()))
-                    .input(Input::new(config.gitlab_token.to_string()))
+                    .input(Input::new(config.github_token.to_string()))
                     .mask_input(true)
                     .into(),
                 InputField::builder()
@@ -147,19 +147,19 @@ impl ConfigPopupState {
         &mut self.input_fields[self.active_input_idx as usize].input
     }
 
-    pub fn to_config(&self) -> GlimConfig {
+    pub fn to_config(&self) -> GlomConfig {
         let values: Vec<&str> = self
             .input_fields
             .iter()
             .map(|field| field.input.value())
             .collect();
 
-        let gitlab_url = values
+        let github_url = values
             .first()
             .unwrap_or(&"")
             .trim()
             .to_compact_string();
-        let gitlab_token = values
+        let github_token = values
             .get(1)
             .unwrap_or(&"")
             .trim()
@@ -182,9 +182,9 @@ impl ConfigPopupState {
 
         let animations = animations_value == "true";
 
-        GlimConfig {
-            gitlab_url,
-            gitlab_token,
+        GlomConfig {
+            github_url,
+            github_token,
             search_filter,
             log_level,
             animations,
@@ -263,24 +263,24 @@ impl StatefulWidget for ConfigPopup {
 
 fn url_description() -> Line<'static> {
     Line::from(vec![
-        Span::from("base url of the gitlab instance, e.g. ").style(theme().input_description),
-        Span::from("https://mygitlab.com/api/v4").style(theme().input_description_em),
+        Span::from("base url of the github instance, e.g. ").style(theme().input_description),
+        Span::from("https://api.github.com").style(theme().input_description_em),
     ])
 }
 
 fn token_description() -> Line<'static> {
     Line::from(vec![
         Span::from("personal access token ").style(theme().input_description_em),
-        Span::from("for the gitlab api; scoped to ").style(theme().input_description),
+        Span::from("for the github api; scoped to ").style(theme().input_description),
         Span::from("read_api").style(theme().input_description_em),
     ])
 }
 
 fn filter_description() -> Line<'static> {
-    Line::from(vec![Span::from(
-        "optional project filter, applied to project namespace",
-    )
-    .style(theme().input_description)])
+    Line::from(vec![
+        Span::from("optional project filter, applied to project namespace")
+            .style(theme().input_description),
+    ])
 }
 
 fn log_level_description() -> Line<'static> {
@@ -294,6 +294,6 @@ fn log_level_description() -> Line<'static> {
 
 fn animations_description() -> Line<'static> {
     Line::from(vec![
-        Span::from("enable visual animations and effects").style(theme().input_description)
+        Span::from("enable visual animations and effects").style(theme().input_description),
     ])
 }

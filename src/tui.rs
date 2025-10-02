@@ -7,8 +7,8 @@ use crossterm::{
 use ratatui::Frame;
 
 use crate::{
-    event::{EventHandler, GlimEvent},
-    result::{GlimError, GlimError::GeneralError},
+    event::{EventHandler, GlomEvent},
+    result::{GlomError, GlomError::GeneralError},
 };
 
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>;
@@ -29,7 +29,7 @@ impl Tui {
         Self { terminal, events }
     }
 
-    pub fn draw(&mut self, render_ui: impl FnOnce(&mut Frame)) -> Result<(), GlimError> {
+    pub fn draw(&mut self, render_ui: impl FnOnce(&mut Frame)) -> Result<(), GlomError> {
         self.terminal
             .draw(render_ui)
             .map_err(|_| GeneralError("failed to draw UI".into()))?;
@@ -40,12 +40,12 @@ impl Tui {
     /// until at least one event is available.
     pub fn receive_events<F>(&self, mut f: F)
     where
-        F: FnMut(GlimEvent),
+        F: FnMut(GlomEvent),
     {
         let mut apply_event = |e| match e {
-            GlimEvent::ProjectsLoaded(p) if p.is_empty() => (),
-            GlimEvent::PipelinesLoaded(p) if p.is_empty() => (),
-            GlimEvent::JobsLoaded(_, _, j) if j.is_empty() => (),
+            GlomEvent::ProjectsLoaded(p) if p.is_empty() => (),
+            GlomEvent::PipelinesLoaded(p) if p.is_empty() => (),
+            GlomEvent::JobsLoaded(_, _, j) if j.is_empty() => (),
             _ => f(e),
         };
 
@@ -55,7 +55,7 @@ impl Tui {
         }
     }
 
-    pub fn enter(&mut self) -> Result<(), GlimError> {
+    pub fn enter(&mut self) -> Result<(), GlomError> {
         terminal::enable_raw_mode()
             .map_err(|_| GeneralError("failed to initialize raw mode".into()))?;
 
@@ -79,7 +79,7 @@ impl Tui {
         Ok(())
     }
 
-    fn reset() -> Result<(), GlimError> {
+    fn reset() -> Result<(), GlomError> {
         terminal::disable_raw_mode()
             .map_err(|_| GeneralError("failed to disable raw mode".into()))?;
         crossterm::execute!(io::stderr(), LeaveAlternateScreen, DisableMouseCapture)
@@ -88,7 +88,7 @@ impl Tui {
         Ok(())
     }
 
-    pub fn exit(&mut self) -> Result<(), GlimError> {
+    pub fn exit(&mut self) -> Result<(), GlomError> {
         Self::reset()?;
         self.terminal
             .show_cursor()

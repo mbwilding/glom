@@ -5,10 +5,10 @@ use directories::ProjectDirs;
 use tracing::{Level, Metadata};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
-    filter::EnvFilter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt, Layer,
+    Layer, filter::EnvFilter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt,
 };
 
-use crate::event::GlimEvent;
+use crate::event::GlomEvent;
 
 /// Configuration for the logging system
 #[derive(Debug, Clone)]
@@ -69,15 +69,15 @@ impl Default for LoggingConfig {
 impl LoggingConfig {
     /// Get the OS-appropriate default log directory
     pub fn default_log_dir() -> PathBuf {
-        if let Some(proj_dirs) = ProjectDirs::from("", "", "glim") {
+        if let Some(proj_dirs) = ProjectDirs::from("", "", "glom") {
             // Use the cache directory for logs (more appropriate for temporary/log files)
-            // On Linux: ~/.cache/glim
-            // On macOS: ~/Library/Caches/glim
-            // On Windows: %LOCALAPPDATA%\glim\cache
+            // On Linux: ~/.cache/glom
+            // On macOS: ~/Library/Caches/glom
+            // On Windows: %LOCALAPPDATA%\glom\cache
             proj_dirs.cache_dir().to_path_buf()
         } else {
             // Fallback to current directory if we can't determine OS directories
-            PathBuf::from("glim-logs")
+            PathBuf::from("glom-logs")
         }
     }
 
@@ -86,24 +86,24 @@ impl LoggingConfig {
         let mut config = Self::default();
 
         // Override log levels from environment
-        if let Ok(level) = std::env::var("GLIM_LOG_LEVEL") {
-            if let Ok(parsed_level) = level.parse::<Level>() {
-                config.file_level = parsed_level;
-            }
+        if let Ok(level) = std::env::var("GLOM_LOG_LEVEL")
+            && let Ok(parsed_level) = level.parse::<Level>()
+        {
+            config.file_level = parsed_level;
         }
 
         // Override log directory from environment
-        if let Ok(log_dir) = std::env::var("GLIM_LOG_DIR") {
+        if let Ok(log_dir) = std::env::var("GLOM_LOG_DIR") {
             config.log_dir = Some(PathBuf::from(log_dir));
         }
 
         // Disable file logging if requested
-        if std::env::var("GLIM_NO_FILE_LOGS").is_ok() {
+        if std::env::var("GLOM_NO_FILE_LOGS").is_ok() {
             config.log_dir = None;
         }
 
         // Enable JSON format for structured logging
-        if std::env::var("GLIM_JSON_LOGS").is_ok() {
+        if std::env::var("GLOM_JSON_LOGS").is_ok() {
             config.json_format = true;
         }
 
@@ -113,12 +113,12 @@ impl LoggingConfig {
 
 /// Custom tracing layer that bridges logs to the internal UI logging system
 pub struct InternalLogsLayer {
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     min_level: Level,
 }
 
 impl InternalLogsLayer {
-    pub fn new(sender: Sender<GlimEvent>, min_level: Level) -> Self {
+    pub fn new(sender: Sender<GlomEvent>, min_level: Level) -> Self {
         Self { sender, min_level }
     }
 }
@@ -146,7 +146,7 @@ where
 
         if let Some(message) = visitor.message {
             // Send the log message to the internal logs system
-            let _ = self.sender.send(GlimEvent::LogEntry(message));
+            let _ = self.sender.send(GlomEvent::LogEntry(message));
         }
     }
 }
@@ -179,7 +179,7 @@ impl tracing::field::Visit for LogMessageVisitor {
 /// Initialize the logging system with the given configuration
 pub fn init_logging(
     config: LoggingConfig,
-    event_sender: Option<Sender<GlimEvent>>,
+    event_sender: Option<Sender<GlomEvent>>,
 ) -> Result<(Option<WorkerGuard>, LoggingReloadHandle), Box<dyn std::error::Error>> {
     let mut layers = vec![];
     let mut guard = None;
@@ -193,7 +193,7 @@ pub fn init_logging(
         // Ensure log directory exists
         std::fs::create_dir_all(log_dir)?;
 
-        let file_appender = tracing_appender::rolling::daily(log_dir, "glim.log");
+        let file_appender = tracing_appender::rolling::daily(log_dir, "glom.log");
         let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
         guard = Some(file_guard);
 

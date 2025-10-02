@@ -1,4 +1,4 @@
-//! Configuration management for GitLab client
+//! Configuration management for GitHub client
 
 use std::{path::PathBuf, time::Duration};
 
@@ -6,12 +6,12 @@ use chrono::{DateTime, Utc};
 use compact_str::CompactString;
 
 use super::error::{ClientError, Result};
-use crate::glim_app::GlimConfig;
+use crate::glom_app::GlomConfig;
 
-/// Main configuration for GitLab client
+/// Main configuration for GitHub client
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// GitLab instance base URL
+    /// GitHub instance base URL
     pub base_url: CompactString,
     /// Private access token
     pub private_token: CompactString,
@@ -140,8 +140,8 @@ impl Default for RequestConfig {
 impl Default for DebugConfig {
     fn default() -> Self {
         Self {
-            log_responses: false,
-            log_directory: Some(PathBuf::from("glim-logs")),
+            log_responses: true, // Enable by default to help debug issues
+            log_directory: Some(PathBuf::from("glom-logs")),
         }
     }
 }
@@ -166,38 +166,58 @@ impl ClientConfig {
     pub fn validate(&self) -> Result<()> {
         if self.base_url.is_empty() {
             return Err(ClientError::config_validation(
-                "gitlab_url",
+                "github_url",
                 "Base URL cannot be empty",
             ));
         }
 
         if self.private_token.is_empty() {
             return Err(ClientError::config_validation(
-                "gitlab_token",
+                "github_token",
                 "Private token cannot be empty",
             ));
         }
 
         if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
             return Err(ClientError::config_validation(
-                "gitlab_url",
+                "github_url",
                 "Base URL must start with http:// or https://",
             ));
         }
 
-        // Enhanced URL validation
+        if !self.base_url.contains("api.github.com")
+            && !self.base_url.contains("github.com/api")
+            && !self.base_url.contains("/api/v3")
+        {
+            return Err(ClientError::config_validation(
+                "github_url",
+                "Base URL should be a GitHub API URL (e.g., https://api.github.com or https://your-enterprise.com/api/v3)",
+            ));
+        }
+
         if url::Url::parse(&self.base_url).is_err() {
             return Err(ClientError::config_validation(
-                "gitlab_url",
+                "github_url",
                 "Base URL is not a valid URL format",
             ));
         }
 
-        // Enhanced token validation
-        if self.private_token.len() < 8 {
+        if self.private_token.len() < 20 {
             return Err(ClientError::config_validation(
-                "gitlab_token",
-                "Private token must be at least 8 characters long",
+                "github_token",
+                "GitHub token must be at least 20 characters long",
+            ));
+        }
+
+        if !self.private_token.starts_with("ghp_")
+            && !self.private_token.starts_with("gho_")
+            && !self.private_token.starts_with("ghu_")
+            && !self.private_token.starts_with("ghs_")
+            && !self.private_token.starts_with("ghr_")
+        {
+            return Err(ClientError::config_validation(
+                "github_token",
+                "GitHub token should start with ghp_, gho_, ghu_, ghs_, or ghr_",
             ));
         }
 
@@ -234,15 +254,15 @@ impl ClientConfig {
     /// Create default pipeline query with config values
     pub fn default_pipeline_query(&self) -> PipelineQuery {
         PipelineQuery {
-            per_page: self.request.per_page.min(60), // GitLab API limit for pipelines
+            per_page: self.request.per_page.min(60), // GitHub API limit for pipelines
             ..Default::default()
         }
     }
 }
 
-impl From<GlimConfig> for ClientConfig {
-    fn from(config: GlimConfig) -> Self {
-        Self::new(config.gitlab_url, config.gitlab_token).with_search_filter(config.search_filter)
+impl From<GlomConfig> for ClientConfig {
+    fn from(config: GlomConfig) -> Self {
+        Self::new(config.github_url, config.github_token).with_search_filter(config.search_filter)
     }
 }
 
@@ -329,46 +349,69 @@ mod tests {
     #[test]
     fn test_config_validation() {
         // Valid config
-        let config = ClientConfig::new("https://gitlab.com", "valid_token_12345");
+        let config = ClientConfig::new(
+            "https://api.github.com",
+            "ghp_1234567890123456789012345678901234567890",
+        );
         assert!(config.validate().is_ok());
 
         // Empty base URL
-        let config = ClientConfig::new("", "valid_token_12345");
+        let config = ClientConfig::new("", "ghp_1234567890123456789012345678901234567890");
         assert!(config.validate().is_err());
 
         // Empty token
-        let config = ClientConfig::new("https://gitlab.com", "");
+        let config = ClientConfig::new("https://api.github.com", "");
         assert!(config.validate().is_err());
 
-        // Short token (less than 8 characters)
-        let config = ClientConfig::new("https://gitlab.com", "short");
+        // Short token (less than 20 characters)
+        let config = ClientConfig::new("https://api.github.com", "short");
+        assert!(config.validate().is_err());
+
+        // Invalid token prefix
+        let config = ClientConfig::new(
+            "https://api.github.com",
+            "invalid_token_12345678901234567890",
+        );
         assert!(config.validate().is_err());
 
         // Invalid URL
-        let config = ClientConfig::new("not-a-url", "valid_token_12345");
+        let config = ClientConfig::new("not-a-url", "ghp_1234567890123456789012345678901234567890");
+        assert!(config.validate().is_err());
+
+        // Non-GitHub URL
+        let config = ClientConfig::new(
+            "https://gitlab.com",
+            "ghp_1234567890123456789012345678901234567890",
+        );
         assert!(config.validate().is_err());
     }
 
     #[test]
-    fn test_from_glim_config() {
-        let glim_config = GlimConfig {
-            gitlab_url: "https://gitlab.example.com".into(),
-            gitlab_token: "test-token".into(),
+    fn test_from_glom_config() {
+        let glom_config = GlomConfig {
+            github_url: "https://api.github.com".into(),
+            github_token: "ghp_1234567890123456789012345678901234567890".into(),
             search_filter: Some("test".into()),
             log_level: Some("Off".into()),
             animations: true,
         };
 
-        let client_config = ClientConfig::from(glim_config);
-        assert_eq!(client_config.base_url, "https://gitlab.example.com");
-        assert_eq!(client_config.private_token, "test-token");
+        let client_config = ClientConfig::from(glom_config);
+        assert_eq!(client_config.base_url, "https://api.github.com");
+        assert_eq!(
+            client_config.private_token,
+            "ghp_1234567890123456789012345678901234567890"
+        );
         assert_eq!(client_config.search_filter, Some("test".into()));
     }
 
     #[test]
     fn test_default_queries() {
-        let config = ClientConfig::new("https://gitlab.com", "token")
-            .with_search_filter(Some("test".into()));
+        let config = ClientConfig::new(
+            "https://api.github.com",
+            "ghp_1234567890123456789012345678901234567890",
+        )
+        .with_search_filter(Some("test".into()));
 
         let project_query = config.default_project_query();
         assert_eq!(project_query.search_filter, Some("test".into()));
@@ -376,6 +419,6 @@ mod tests {
         assert!(!project_query.archived);
 
         let pipeline_query = config.default_pipeline_query();
-        assert_eq!(pipeline_query.per_page, 60); // Limited by GitLab API
+        assert_eq!(pipeline_query.per_page, 60); // Limited by GitHub API
     }
 }

@@ -1,6 +1,6 @@
-//! GitLab client modules
+//! GitHub client modules
 //!
-//! This module provides a well-structured, testable GitLab API client
+//! This module provides a well-structured, testable GitHub API client
 //! split into focused components following single responsibility principle.
 
 pub mod api;
@@ -9,15 +9,12 @@ pub mod error;
 pub mod poller;
 pub mod service;
 
-#[cfg(test)]
-mod tests;
-
 // Re-export main types for convenience
-pub use api::GitlabApi;
+pub use api::GithubApi;
 pub use config::ClientConfig;
 pub use error::ClientError;
-pub use poller::GitlabPoller;
-pub use service::GitlabService;
+pub use poller::GithubPoller;
+pub use service::GithubService;
 
 #[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, ClientError>;

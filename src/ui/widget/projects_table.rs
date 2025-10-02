@@ -7,12 +7,12 @@ use ratatui::{
 };
 
 use crate::{
-    domain::{parse_row, Project},
+    domain::{Project, parse_row},
     theme::theme,
     ui::widget::Shortcuts,
 };
 
-/// gitlab pipelines widget
+/// github pipelines widget
 pub struct ProjectsTable<'a> {
     rows: Vec<Row<'a>>,
     filter_active: bool,
@@ -72,7 +72,7 @@ impl StatefulWidget for ProjectsTable<'_> {
 
         // Render main table block
         Block::new()
-            .title(" gitlab pipelines ")
+            .title(" github pipelines ")
             .title_style(theme().border_title)
             .title_bottom(shortcuts.as_line())
             .borders(if self.filter_active {

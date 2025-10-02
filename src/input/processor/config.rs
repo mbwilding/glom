@@ -3,25 +3,25 @@ use std::sync::mpsc::Sender;
 use crossterm::event::{Event as CrosstermEvent, KeyCode};
 use tui_input::backend::crossterm::EventHandler;
 
-use crate::{dispatcher::Dispatcher, event::GlimEvent, input::InputProcessor, ui::StatefulWidgets};
+use crate::{dispatcher::Dispatcher, event::GlomEvent, input::InputProcessor, ui::StatefulWidgets};
 
 pub struct ConfigProcessor {
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
 }
 
 impl ConfigProcessor {
-    pub fn new(sender: Sender<GlimEvent>) -> Self {
+    pub fn new(sender: Sender<GlomEvent>) -> Self {
         Self { sender }
     }
 }
 
 impl InputProcessor for ConfigProcessor {
-    fn apply(&mut self, event: &GlimEvent, widgets: &mut StatefulWidgets) {
-        if let GlimEvent::InputKey(code) = event {
+    fn apply(&mut self, event: &GlomEvent, widgets: &mut StatefulWidgets) {
+        if let GlomEvent::InputKey(code) = event {
             let popup = widgets.config_popup_state.as_mut().unwrap();
             match code.code {
-                KeyCode::Enter => self.sender.dispatch(GlimEvent::ConfigApply),
-                KeyCode::Esc => self.sender.dispatch(GlimEvent::ConfigClose),
+                KeyCode::Enter => self.sender.dispatch(GlomEvent::ConfigApply),
+                KeyCode::Esc => self.sender.dispatch(GlomEvent::ConfigClose),
                 KeyCode::Down => popup.select_next_input(),
                 KeyCode::Up => popup.select_previous_input(),
                 KeyCode::Tab => popup.select_next_input(),
@@ -44,7 +44,7 @@ impl InputProcessor for ConfigProcessor {
                             .handle_event(&CrosstermEvent::Key(*code));
                     }
                 },
-                KeyCode::F(12) => self.sender.dispatch(GlimEvent::ScreenCapture),
+                KeyCode::F(12) => self.sender.dispatch(GlomEvent::ScreenCapture),
                 _ => {
                     if !popup.is_current_field_dropdown() {
                         popup

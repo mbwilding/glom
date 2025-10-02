@@ -1,9 +1,9 @@
-//! Error types for GitLab client operations
+//! Error types for GitHub client operations
 
 use compact_str::CompactString;
 use thiserror::Error;
 
-/// Structured error types for GitLab client operations
+/// Structured error types for GitHub client operations
 #[derive(Debug, Error)]
 pub enum ClientError {
     /// HTTP request failed
@@ -19,9 +19,9 @@ pub enum ClientError {
         source: serde_json::Error,
     },
 
-    /// GitLab API returned an error response
-    #[error("GitLab API error: {message}")]
-    GitlabApi { message: CompactString },
+    /// GitHub API returned an error response
+    #[error("GitHub API error: {message}")]
+    GithubApi { message: CompactString },
 
     /// Configuration is invalid
     #[error("Configuration error: {0}")]
@@ -35,12 +35,12 @@ pub enum ClientError {
     #[error("Authentication failed")]
     Authentication,
 
-    /// GitLab token is invalid
-    #[error("GitLab token is invalid")]
+    /// GitHub token is invalid
+    #[error("GitHub token is invalid")]
     InvalidToken,
 
-    /// GitLab token has expired
-    #[error("GitLab token has expired")]
+    /// GitHub token has expired
+    #[error("GitHub token has expired")]
     ExpiredToken,
 
     /// Network timeout
@@ -76,9 +76,9 @@ impl ClientError {
         }
     }
 
-    /// Create a GitLab API error
-    pub fn gitlab_api(message: impl Into<CompactString>) -> Self {
-        Self::GitlabApi { message: message.into() }
+    /// Create a GitHub API error
+    pub fn github_api(message: impl Into<CompactString>) -> Self {
+        Self::GithubApi { message: message.into() }
     }
 
     /// Create a configuration error
@@ -144,10 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn test_gitlab_api_error() {
-        let err = ClientError::gitlab_api("Project not found");
-        assert!(matches!(err, ClientError::GitlabApi { .. }));
-        assert_eq!(err.to_string(), "GitLab API error: Project not found");
+    fn test_github_api_error() {
+        let err = ClientError::github_api("Project not found");
+        assert!(matches!(err, ClientError::GithubApi { .. }));
+        assert_eq!(err.to_string(), "GitHub API error: Project not found");
     }
 
     #[test]

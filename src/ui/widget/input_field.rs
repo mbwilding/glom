@@ -76,11 +76,11 @@ impl InputField {
     }
 
     pub fn set_dropdown_value(&mut self, value: &str) {
-        if let Some(options) = &self.dropdown_options {
-            if let Some(index) = options.iter().position(|&option| option == value) {
-                self.selected_option_index = index;
-                self.input = Input::new(value.to_string());
-            }
+        if let Some(options) = &self.dropdown_options
+            && let Some(index) = options.iter().position(|&option| option == value)
+        {
+            self.selected_option_index = index;
+            self.input = Input::new(value.to_string());
         }
     }
 }

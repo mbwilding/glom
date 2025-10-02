@@ -6,14 +6,14 @@ use thiserror::Error;
 
 use crate::id::{PipelineId, ProjectId};
 
-pub type Result<T> = std::result::Result<T, GlimError>;
+pub type Result<T> = std::result::Result<T, GlomError>;
 
 #[derive(Debug, Clone, Error)]
-pub enum GlimError {
-    #[error("The provided Gitlab token is invalid.")]
-    InvalidGitlabToken,
-    #[error("The provided Gitlab token has expired.")]
-    ExpiredGitlabToken,
+pub enum GlomError {
+    #[error("The provided Github token is invalid.")]
+    InvalidGithubToken,
+    #[error("The provided Github token has expired.")]
+    ExpiredGithubToken,
 
     #[error("Configuration file not found: {path}")]
     ConfigFileNotFound { path: PathBuf },
@@ -39,28 +39,28 @@ pub enum GlimError {
 
     #[error("project_id={0}/pipeline_id={1}: {2}")]
     #[allow(dead_code)]
-    GitlabGetJobsError(ProjectId, PipelineId, CompactString),
+    GithubGetJobsError(ProjectId, PipelineId, CompactString),
     #[error("project_id={0}/pipeline_id={1}: {2}")]
     #[allow(dead_code)]
-    GitlabGetTriggerJobsError(ProjectId, PipelineId, CompactString),
+    GithubGetTriggerJobsError(ProjectId, PipelineId, CompactString),
     #[error("project_id={0}/pipeline_id={1}: {2}")]
     #[allow(dead_code)]
-    GitlabGetPipelinesError(ProjectId, PipelineId, CompactString),
+    GithubGetPipelinesError(ProjectId, PipelineId, CompactString),
 }
 
-impl From<reqwest::Error> for GlimError {
+impl From<reqwest::Error> for GlomError {
     fn from(e: reqwest::Error) -> Self {
-        GlimError::GeneralError(e.to_compact_string())
+        GlomError::GeneralError(e.to_compact_string())
     }
 }
 
-impl From<crate::client::ClientError> for GlimError {
+impl From<crate::client::ClientError> for GlomError {
     fn from(e: crate::client::ClientError) -> Self {
-        GlimError::GeneralError(e.to_string().into())
+        GlomError::GeneralError(e.to_string().into())
     }
 }
 
-impl GlimError {
+impl GlomError {
     /// Create a configuration file not found error
     pub fn config_file_not_found(path: PathBuf) -> Self {
         Self::ConfigFileNotFound { path }

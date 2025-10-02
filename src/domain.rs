@@ -1,4 +1,3 @@
-// GitLab API Documentation: https://docs.gitlab.com/ee/api/api_resources.html
 use chrono::{DateTime, Duration, Local, Utc};
 use compact_str::{CompactString, ToCompactString};
 use itertools::Itertools;
@@ -27,12 +26,15 @@ pub struct Project {
     pub commit_count: u32,
     pub repo_size_kb: u64,
     pub artifacts_size_kb: u64,
+    pub statistics_loading: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct Pipeline {
     pub id: PipelineId,
     pub project_id: ProjectId,
+    /// Workflow name
+    pub name: CompactString,
     pub status: PipelineStatus,
     pub source: PipelineSource,
     pub branch: CompactString,
@@ -66,14 +68,17 @@ pub struct Job {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ProjectDto {
-    pub id: ProjectId,
-    pub path_with_namespace: CompactString,
+    pub full_name: CompactString,
     pub description: Option<CompactString>,
     pub default_branch: CompactString,
-    pub ssh_url_to_repo: CompactString,
-    pub web_url: CompactString,
-    pub last_activity_at: DateTime<Utc>,
-    pub statistics: StatisticsDto,
+    #[serde(default = "default_ssh_url")]
+    pub ssh_url: CompactString,
+    pub html_url: CompactString,
+    pub updated_at: DateTime<Utc>,
+}
+
+fn default_ssh_url() -> CompactString {
+    "".into()
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -81,6 +86,11 @@ pub struct StatisticsDto {
     pub commit_count: u32,
     pub job_artifacts_size: u64,
     pub repository_size: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubSearchResponse<T> {
+    pub items: Vec<T>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -93,44 +103,76 @@ pub struct CommitDto {
 pub struct JobDto {
     pub id: JobId,
     pub name: CompactString,
-    pub stage: CompactString,
+    #[serde(skip)]
     pub commit: CommitDto,
     pub status: PipelineStatus,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
-    pub finished_at: Option<DateTime<Utc>>,
-    pub web_url: CompactString,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub html_url: CompactString,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubJobsResponse {
+    pub jobs: Vec<JobDto>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RepositoryDetailsDto {
+    /// Repository size in KB
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubArtifactsResponse {
+    pub artifacts: Vec<ArtifactDto>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ArtifactDto {
+    pub size_in_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ContributorDto {
+    pub contributions: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PipelineDto {
     pub id: PipelineId,
+    #[serde(skip)]
     pub project_id: ProjectId,
+    pub name: CompactString,
     pub status: PipelineStatus,
-    pub source: PipelineSource,
-    #[serde(rename = "ref")]
-    pub branch: CompactString,
-    pub web_url: CompactString,
+    pub event: PipelineSource,
+    pub head_branch: Option<CompactString>,
+    pub html_url: CompactString,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubWorkflowRunsResponse {
+    pub workflow_runs: Vec<PipelineDto>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStatus {
     #[default]
-    Created,
-    WaitingForResource,
-    Preparing,
-    Pending,
-    Running,
-    Success,
-    Failed,
-    Canceling,
-    Canceled,
+    Queued,
+    InProgress,
+    Completed,
+    #[serde(rename = "action_required")]
+    ActionRequired,
+    Cancelled,
+    Failure,
+    Neutral,
     Skipped,
-    Manual,
-    Scheduled,
+    Stale,
+    Success,
+    TimedOut,
     #[serde(other)]
     Unknown,
 }
@@ -139,41 +181,72 @@ pub enum PipelineStatus {
 #[serde(rename_all = "snake_case")]
 pub enum PipelineSource {
     #[default]
-    Api,
-    Chat,
-    External,
-    ExternalPullRequestEvent,
-    MergeRequestEvent,
-    OndemandDastScan,
-    OndemandDastValidation,
-    ParentPipeline,
-    Pipeline,
     Push,
+    PullRequest,
+    Release,
     Schedule,
-    SecurityOrchestrationPolicy,
-    Trigger,
-    Web,
-    Webide,
+    WorkflowDispatch,
+    CheckRun,
+    CheckSuite,
+    Create,
+    Delete,
+    Deployment,
+    DeploymentStatus,
+    Fork,
+    Gollum,
+    IssueComment,
+    Issues,
+    Label,
+    Milestone,
+    PageBuild,
+    Project,
+    ProjectCard,
+    ProjectColumn,
+    Public,
+    PullRequestReview,
+    PullRequestReviewComment,
+    RegistryPackage,
+    RepositoryDispatch,
+    Status,
+    Watch,
+    WorkflowRun,
+    #[serde(other)]
+    Unknown,
 }
 
 impl PipelineSource {
     pub fn to_string(&self) -> CompactString {
         match self {
-            PipelineSource::Api => "api",
-            PipelineSource::Chat => "chat",
-            PipelineSource::External => "external",
-            PipelineSource::ExternalPullRequestEvent => "pull request",
-            PipelineSource::MergeRequestEvent => "merge request",
-            PipelineSource::OndemandDastScan => "dast scan",
-            PipelineSource::OndemandDastValidation => "dast validation",
-            PipelineSource::ParentPipeline => "parent pipeline",
-            PipelineSource::Pipeline => "pipeline",
             PipelineSource::Push => "push",
+            PipelineSource::PullRequest => "pull request",
+            PipelineSource::Release => "release",
             PipelineSource::Schedule => "schedule",
-            PipelineSource::SecurityOrchestrationPolicy => "sec policy",
-            PipelineSource::Trigger => "trigger",
-            PipelineSource::Web => "web",
-            PipelineSource::Webide => "web ide",
+            PipelineSource::WorkflowDispatch => "manual",
+            PipelineSource::CheckRun => "check run",
+            PipelineSource::CheckSuite => "check suite",
+            PipelineSource::Create => "create",
+            PipelineSource::Delete => "delete",
+            PipelineSource::Deployment => "deployment",
+            PipelineSource::DeploymentStatus => "deploy status",
+            PipelineSource::Fork => "fork",
+            PipelineSource::Gollum => "wiki",
+            PipelineSource::IssueComment => "issue comment",
+            PipelineSource::Issues => "issues",
+            PipelineSource::Label => "label",
+            PipelineSource::Milestone => "milestone",
+            PipelineSource::PageBuild => "pages",
+            PipelineSource::Project => "project",
+            PipelineSource::ProjectCard => "project card",
+            PipelineSource::ProjectColumn => "project column",
+            PipelineSource::Public => "public",
+            PipelineSource::PullRequestReview => "pr review",
+            PipelineSource::PullRequestReviewComment => "pr comment",
+            PipelineSource::RegistryPackage => "package",
+            PipelineSource::RepositoryDispatch => "repo dispatch",
+            PipelineSource::Status => "status",
+            PipelineSource::Watch => "watch",
+            PipelineSource::WorkflowRun => "workflow",
+            PipelineSource::Unknown => "unknown",
         }
         .into()
     }
@@ -181,7 +254,10 @@ impl PipelineSource {
 
 impl PipelineStatus {
     pub(crate) fn is_active(&self) -> bool {
-        self < &PipelineStatus::Success
+        matches!(
+            self,
+            PipelineStatus::Queued | PipelineStatus::InProgress | PipelineStatus::ActionRequired
+        )
     }
 }
 
@@ -189,14 +265,11 @@ impl PipelineSource {
     pub(crate) fn is_interesting(&self) -> bool {
         matches!(
             self,
-            PipelineSource::Api
-                | PipelineSource::Chat
-                | PipelineSource::ParentPipeline
-                | PipelineSource::Push
+            PipelineSource::Push
+                | PipelineSource::PullRequest
                 | PipelineSource::Schedule
-                | PipelineSource::Trigger
-                | PipelineSource::Web
-                | PipelineSource::Webide
+                | PipelineSource::WorkflowDispatch
+                | PipelineSource::Release
         )
     }
 }
@@ -275,17 +348,18 @@ impl Project {
 impl From<ProjectDto> for Project {
     fn from(p: ProjectDto) -> Self {
         Self {
-            id: p.id,
+            id: ProjectId::new(p.full_name.clone()),
             description: p.description,
-            path: p.path_with_namespace,
+            path: p.full_name,
             default_branch: p.default_branch,
-            ssh_git_url: p.ssh_url_to_repo,
-            url: p.web_url,
-            last_activity_at: p.last_activity_at,
+            ssh_git_url: p.ssh_url,
+            url: p.html_url,
+            last_activity_at: p.updated_at,
             pipelines: None,
-            commit_count: p.statistics.commit_count,
-            repo_size_kb: p.statistics.repository_size / 1024,
-            artifacts_size_kb: p.statistics.job_artifacts_size / 1024,
+            commit_count: 0,
+            repo_size_kb: 0,
+            artifacts_size_kb: 0,
+            statistics_loading: false,
         }
     }
 }
@@ -334,18 +408,18 @@ impl Project {
     }
 
     pub fn update_jobs(&mut self, pipeline_id: PipelineId, jobs: Vec<Job>) {
-        if let Some(pipelines) = self.pipelines.as_mut() {
-            if let Some(pipeline) = pipelines.iter_mut().find(|p| p.id == pipeline_id) {
-                pipeline.jobs = Some(jobs);
-            }
+        if let Some(pipelines) = self.pipelines.as_mut()
+            && let Some(pipeline) = pipelines.iter_mut().find(|p| p.id == pipeline_id)
+        {
+            pipeline.jobs = Some(jobs);
         }
     }
 
     pub fn update_commit(&mut self, pipeline_id: PipelineId, commit: Commit) {
-        if let Some(pipelines) = self.pipelines.as_mut() {
-            if let Some(pipeline) = pipelines.iter_mut().find(|p| p.id == pipeline_id) {
-                pipeline.commit = Some(commit);
-            }
+        if let Some(pipelines) = self.pipelines.as_mut()
+            && let Some(pipeline) = pipelines.iter_mut().find(|p| p.id == pipeline_id)
+        {
+            pipeline.commit = Some(commit);
         }
     }
 }
@@ -355,10 +429,11 @@ impl From<PipelineDto> for Pipeline {
         Self {
             id: p.id,
             project_id: p.project_id,
+            name: p.name,
             status: p.status,
-            source: p.source,
-            branch: p.branch,
-            url: p.web_url,
+            source: p.event,
+            branch: p.head_branch.unwrap_or_else(|| "unknown".into()),
+            url: p.html_url,
             created_at: p.created_at,
             updated_at: p.updated_at,
             jobs: None,
@@ -372,12 +447,12 @@ impl From<JobDto> for Job {
         Self {
             id: j.id,
             name: j.name,
-            stage: j.stage,
+            stage: "job".into(),
             status: j.status,
             created_at: j.created_at,
             started_at: j.started_at,
-            finished_at: j.finished_at,
-            url: j.web_url,
+            finished_at: j.completed_at,
+            url: j.html_url,
         }
     }
 }
@@ -404,7 +479,7 @@ impl Pipeline {
     pub fn failed_job(&self) -> Option<&Job> {
         self.jobs.as_ref().and_then(|jobs| {
             jobs.iter()
-                .find(|j| j.status == PipelineStatus::Failed)
+                .find(|j| j.status == PipelineStatus::Failure)
         })
     }
 
@@ -504,7 +579,7 @@ pub fn parse_row<'a>(project: &'a Project) -> Row<'a> {
     let project_path = match project.path.rfind('/') {
         Some(i) => Text::from(vec![
             Line::from(&project.path[i + 1..]).style(theme().project_name),
-            Line::from(&project.path[0..=i]).style(theme().project_parents),
+            Line::from(&project.path[0..i]).style(theme().project_parents),
         ]),
         None => Text::from(Span::from(&project.path)).style(theme().project_name),
     };
@@ -528,18 +603,17 @@ pub trait IconRepresentable {
 impl IconRepresentable for PipelineStatus {
     fn icon(&self) -> CompactString {
         match self {
-            PipelineStatus::Created => "⚪",
-            PipelineStatus::WaitingForResource => "⏳",
-            PipelineStatus::Preparing => "🟡",
-            PipelineStatus::Pending => "🕒",
-            PipelineStatus::Running => "🔵",
-            PipelineStatus::Success => "🟢",
-            PipelineStatus::Failed => "🔴",
-            PipelineStatus::Canceled => "🚫",
-            PipelineStatus::Canceling => "🚫",
+            PipelineStatus::Queued => "🕒",
+            PipelineStatus::InProgress => "🔵",
+            PipelineStatus::Completed => "🟢",
+            PipelineStatus::ActionRequired => "🟡",
+            PipelineStatus::Cancelled => "🚫",
+            PipelineStatus::Failure => "🔴",
+            PipelineStatus::Neutral => "⚪",
             PipelineStatus::Skipped => "⚫",
-            PipelineStatus::Manual => "🟣",
-            PipelineStatus::Scheduled => "📅",
+            PipelineStatus::Stale => "🟤",
+            PipelineStatus::Success => "🟢",
+            PipelineStatus::TimedOut => "⏰",
             PipelineStatus::Unknown => "❓",
         }
         .into()

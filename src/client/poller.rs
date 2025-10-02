@@ -1,32 +1,32 @@
-//! Background polling for GitLab resources
+//! Background polling for GitHub resources
 
 use std::{sync::Arc, time::Duration};
 
 use tokio::{sync::broadcast, time::sleep};
 use tracing::{debug, error, info, instrument};
 
-use super::{api::GitlabApi, config::PollingConfig, service::GitlabService};
-use crate::{dispatcher::Dispatcher, event::GlimEvent};
+use super::{api::GithubApi, config::PollingConfig, service::GithubService};
+use crate::{dispatcher::Dispatcher, event::GlomEvent};
 
-/// Background poller for GitLab resources
+/// Background poller for GitHub resources
 ///
 /// Manages periodic fetching of projects and active jobs with configurable intervals
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct GitlabPoller {
-    api: Arc<GitlabApi>,
-    sender: std::sync::mpsc::Sender<GlimEvent>,
+pub struct GithubPoller {
+    api: Arc<GithubApi>,
+    sender: std::sync::mpsc::Sender<GlomEvent>,
     config: PollingConfig,
     shutdown_tx: broadcast::Sender<()>,
     shutdown_rx: broadcast::Receiver<()>,
 }
 
 #[allow(dead_code)]
-impl GitlabPoller {
-    /// Create a new GitLab poller
+impl GithubPoller {
+    /// Create a new GitHub poller
     pub fn new(
-        api: Arc<GitlabApi>,
-        sender: std::sync::mpsc::Sender<GlimEvent>,
+        api: Arc<GithubApi>,
+        sender: std::sync::mpsc::Sender<GlomEvent>,
         config: PollingConfig,
     ) -> Self {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -44,7 +44,7 @@ impl GitlabPoller {
         info!(
             projects_interval = ?self.config.projects_interval,
             jobs_interval = ?self.config.jobs_interval,
-            "Starting GitLab poller"
+            "Starting GitHub poller"
         );
 
         // Spawn projects polling task
@@ -74,7 +74,7 @@ impl GitlabPoller {
         // Wait for shutdown signal
         let _ = self.shutdown_rx.recv().await;
 
-        info!("Shutting down GitLab poller");
+        info!("Shutting down GitHub poller");
 
         // Cancel polling tasks
         projects_task.abort();
@@ -88,7 +88,7 @@ impl GitlabPoller {
 
     /// Send shutdown signal to stop polling
     pub fn shutdown(&self) {
-        debug!("Sending shutdown signal to GitLab poller");
+        debug!("Sending shutdown signal to GitHub poller");
         let _ = self.shutdown_tx.send(());
     }
 
@@ -112,8 +112,8 @@ impl GitlabPoller {
     /// Poll projects at regular intervals
     #[instrument(skip(api, sender, shutdown_rx), fields(interval = ?interval))]
     async fn poll_projects(
-        api: Arc<GitlabApi>,
-        sender: std::sync::mpsc::Sender<GlimEvent>,
+        api: Arc<GithubApi>,
+        sender: std::sync::mpsc::Sender<GlomEvent>,
         interval: Duration,
         shutdown_rx: &mut broadcast::Receiver<()>,
     ) {
@@ -123,7 +123,7 @@ impl GitlabPoller {
             tokio::select! {
                 _ = sleep(interval) => {
                     debug!("Polling projects");
-                    let service = GitlabService::from_api(api.clone(), sender.clone()).unwrap();
+                    let service = GithubService::from_api(api.clone(), sender.clone()).unwrap();
                     service.spawn_fetch_projects(None);
                 }
                 _ = shutdown_rx.recv() => {
@@ -139,8 +139,8 @@ impl GitlabPoller {
     /// Poll active jobs at regular intervals
     #[instrument(skip(_api, sender, shutdown_rx), fields(interval = ?interval))]
     async fn poll_active_jobs(
-        _api: Arc<GitlabApi>,
-        sender: std::sync::mpsc::Sender<GlimEvent>,
+        _api: Arc<GithubApi>,
+        sender: std::sync::mpsc::Sender<GlomEvent>,
         interval: Duration,
         shutdown_rx: &mut broadcast::Receiver<()>,
     ) {
@@ -152,7 +152,7 @@ impl GitlabPoller {
                     debug!("Requesting active jobs refresh");
                     // Dispatch event to request active jobs refresh
                     // The main application will handle which jobs to fetch
-                    sender.dispatch(GlimEvent::JobsActiveFetch);
+                    sender.dispatch(GlomEvent::JobsActiveFetch);
                 }
                 _ = shutdown_rx.recv() => {
                     debug!("Active jobs polling received shutdown signal");
@@ -165,17 +165,17 @@ impl GitlabPoller {
     }
 }
 
-/// Builder for GitlabPoller with fluent API
+/// Builder for GithubPoller with fluent API
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct GitlabPollerBuilder {
-    api: Option<Arc<GitlabApi>>,
-    sender: Option<std::sync::mpsc::Sender<GlimEvent>>,
+pub struct GithubPollerBuilder {
+    api: Option<Arc<GithubApi>>,
+    sender: Option<std::sync::mpsc::Sender<GlomEvent>>,
     config: PollingConfig,
 }
 
 #[allow(dead_code)]
-impl GitlabPollerBuilder {
+impl GithubPollerBuilder {
     /// Create a new poller builder
     pub fn new() -> Self {
         Self {
@@ -185,14 +185,14 @@ impl GitlabPollerBuilder {
         }
     }
 
-    /// Set the GitLab API
-    pub fn api(mut self, api: Arc<GitlabApi>) -> Self {
+    /// Set the GitHub API
+    pub fn api(mut self, api: Arc<GithubApi>) -> Self {
         self.api = Some(api);
         self
     }
 
     /// Set the event sender
-    pub fn sender(mut self, sender: std::sync::mpsc::Sender<GlimEvent>) -> Self {
+    pub fn sender(mut self, sender: std::sync::mpsc::Sender<GlomEvent>) -> Self {
         self.sender = Some(sender);
         self
     }
@@ -215,35 +215,35 @@ impl GitlabPollerBuilder {
         self
     }
 
-    /// Build the GitLab poller
-    pub fn build(self) -> Result<GitlabPoller, String> {
-        let api = self.api.ok_or("GitLab API is required")?;
+    /// Build the GitHub poller
+    pub fn build(self) -> Result<GithubPoller, String> {
+        let api = self.api.ok_or("GitHub API is required")?;
         let sender = self.sender.ok_or("Event sender is required")?;
-        Ok(GitlabPoller::new(api, sender, self.config))
+        Ok(GithubPoller::new(api, sender, self.config))
     }
 }
 
-impl Default for GitlabPollerBuilder {
+impl Default for GithubPollerBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Spawn a GitLab poller as a background task
+/// Spawn a GitHub poller as a background task
 ///
 /// This is a convenience function for quickly starting background polling
 #[allow(dead_code)]
 pub async fn spawn_poller(
-    api: Arc<GitlabApi>,
-    sender: std::sync::mpsc::Sender<GlimEvent>,
+    api: Arc<GithubApi>,
+    sender: std::sync::mpsc::Sender<GlomEvent>,
     config: PollingConfig,
 ) -> broadcast::Sender<()> {
-    let poller = GitlabPoller::new(api, sender, config);
+    let poller = GithubPoller::new(api, sender, config);
     let shutdown_sender = poller.shutdown_sender();
 
     tokio::spawn(async move {
         if let Err(e) = poller.start().await {
-            error!("GitLab poller failed: {}", e);
+            error!("GitHub poller failed: {}", e);
         }
     });
 
@@ -255,15 +255,15 @@ mod tests {
     use std::{sync::mpsc, time::Duration};
 
     use super::*;
-    use crate::client::{api::GitlabApi, config::ClientConfig};
+    use crate::client::{api::GithubApi, config::ClientConfig};
 
-    async fn test_api() -> Arc<GitlabApi> {
-        let config = ClientConfig::new("https://gitlab.example.com", "test-token");
-        let api = GitlabApi::force_new(config).unwrap();
+    async fn test_api() -> Arc<GithubApi> {
+        let config = ClientConfig::new("https://github.example.com", "test-token");
+        let api = GithubApi::force_new(config).unwrap();
         Arc::new(api)
     }
 
-    fn test_sender() -> std::sync::mpsc::Sender<GlimEvent> {
+    fn test_sender() -> std::sync::mpsc::Sender<GlomEvent> {
         let (sender, _receiver) = mpsc::channel();
         sender
     }
@@ -273,7 +273,7 @@ mod tests {
         let api = test_api().await;
         let sender = test_sender();
         let config = PollingConfig::default();
-        let poller = GitlabPoller::new(api, sender, config);
+        let poller = GithubPoller::new(api, sender, config);
 
         assert_eq!(poller.config.projects_interval, Duration::from_secs(60));
         assert_eq!(poller.config.jobs_interval, Duration::from_secs(30));
@@ -283,7 +283,7 @@ mod tests {
     async fn test_poller_builder() {
         let api = test_api().await;
         let sender = test_sender();
-        let poller = GitlabPollerBuilder::new()
+        let poller = GithubPollerBuilder::new()
             .api(api)
             .sender(sender)
             .projects_interval(Duration::from_secs(120))
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_builder_validation() {
-        let result = GitlabPollerBuilder::new()
+        let result = GithubPollerBuilder::new()
             .projects_interval(Duration::from_secs(120))
             .build();
 
@@ -314,7 +314,7 @@ mod tests {
             jobs_interval: Duration::from_millis(10),
         };
 
-        let poller = GitlabPoller::new(api, sender, config);
+        let poller = GithubPoller::new(api, sender, config);
         let shutdown_sender = poller.shutdown_sender();
 
         // Start poller in background

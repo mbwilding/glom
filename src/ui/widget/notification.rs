@@ -30,15 +30,15 @@ impl NotificationState {
             | NoticeMessage::ConfigError(_)
             | NoticeMessage::JsonDeserializeError(_, _)
             | NoticeMessage::ScreenCaptured
-            | NoticeMessage::InvalidGitlabToken
-            | NoticeMessage::ExpiredGitlabToken
+            | NoticeMessage::InvalidGithubToken
+            | NoticeMessage::ExpiredGithubToken
             | NoticeMessage::LogLevelChanged(_) => None,
 
-            NoticeMessage::JobLogDownloaded(id, _, _)
-            | NoticeMessage::GitlabGetJobsError(id, _, _)
-            | NoticeMessage::GitlabGetTriggerJobsError(id, _, _)
-            | NoticeMessage::GitlabGetPipelinesError(id, _, _) => {
-                project_lookup.find(id).map(|p| p.title())
+            NoticeMessage::JobLogDownloaded(ref id, _)
+            | NoticeMessage::GithubGetJobsError(ref id, _, _)
+            | NoticeMessage::GithubGetTriggerJobsError(ref id, _, _)
+            | NoticeMessage::GithubGetPipelinesError(ref id, _, _) => {
+                project_lookup.find(id.clone()).map(|p| p.title())
             },
         };
 
@@ -63,11 +63,11 @@ impl StatefulWidget for Notification {
             NoticeMessage::ConfigError(s) => {
                 Line::from(vec![Span::from("Config error: "), Span::from(s)])
             },
-            NoticeMessage::InvalidGitlabToken => Line::from(Span::from(
-                "Invalid GitLab token - please check your configuration",
+            NoticeMessage::InvalidGithubToken => Line::from(Span::from(
+                "Invalid GitHub token - please check your configuration",
             )),
-            NoticeMessage::ExpiredGitlabToken => Line::from(Span::from(
-                "GitLab token has expired - please update your configuration",
+            NoticeMessage::ExpiredGithubToken => Line::from(Span::from(
+                "GitHub token has expired - please update your configuration",
             )),
             NoticeMessage::JsonDeserializeError(cat, s) => Line::from(vec![
                 Span::from("Failed to parse JSON ("),
@@ -75,25 +75,25 @@ impl StatefulWidget for Notification {
                 Span::from(")"),
                 Span::from(s),
             ]),
-            NoticeMessage::GitlabGetJobsError(_, _, s) => Line::from(vec![
+            NoticeMessage::GithubGetJobsError(_, _, s) => Line::from(vec![
                 Span::from("Failed to get jobs for "),
                 Span::from(project).style(theme().notification_project),
                 Span::from(": "),
                 Span::from(s),
             ]),
-            NoticeMessage::GitlabGetTriggerJobsError(_, _, s) => Line::from(vec![
+            NoticeMessage::GithubGetTriggerJobsError(_, _, s) => Line::from(vec![
                 Span::from("Failed to get trigger jobs for "),
                 Span::from(project).style(theme().notification_project),
                 Span::from(": "),
                 Span::from(s),
             ]),
-            NoticeMessage::GitlabGetPipelinesError(_, _, s) => Line::from(vec![
+            NoticeMessage::GithubGetPipelinesError(_, _, s) => Line::from(vec![
                 Span::from("Failed to get pipelines for "),
                 Span::from(project).style(theme().notification_project),
                 Span::from(": "),
                 Span::from(s),
             ]),
-            NoticeMessage::JobLogDownloaded(_, _, _) => Line::from(vec![
+            NoticeMessage::JobLogDownloaded(_, _) => Line::from(vec![
                 Span::from("Finished downloading job log for "),
                 Span::from(project).style(theme().notification_project),
             ]),

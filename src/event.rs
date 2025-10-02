@@ -6,22 +6,22 @@ use tracing::Level;
 
 use crate::{
     dispatcher::Dispatcher,
-    domain::{JobDto, PipelineDto, Project, ProjectDto},
-    glim_app::GlimConfig,
+    domain::{JobDto, PipelineDto, Project, ProjectDto, StatisticsDto},
+    glom_app::GlomConfig,
     id::{JobId, PipelineId, ProjectId},
     result,
 };
 
 #[derive(Debug, Clone)]
-pub enum GlimEvent {
-    AppError(result::GlimError),
+pub enum GlomEvent {
+    AppError(result::GlomError),
     AppExit,
     AppTick,
     ApplyTemporaryFilter(Option<CompactString>),
     ConfigApply,
     ConfigClose,
     ConfigOpen,
-    ConfigUpdate(GlimConfig),
+    ConfigUpdate(GlomConfig),
     FilterClear,
     FilterInputBackspace,
     FilterInputChar(CompactString),
@@ -57,57 +57,61 @@ pub enum GlimEvent {
     ProjectUpdated(Box<Project>),
     ProjectsFetch,
     ProjectsLoaded(Vec<ProjectDto>),
+    ProjectStatisticsFetch(ProjectId),
+    ProjectStatisticsLoaded(ProjectId, StatisticsDto),
     ScreenCapture,
     ScreenCaptureToClipboard(String),
 }
 
-impl GlimEvent {
-    /// Get the variant name as a string slice (without "GlimEvent::" prefix)
+impl GlomEvent {
+    /// Get the variant name as a string slice (without "GlomEvent::" prefix)
     pub fn variant_name(&self) -> &'static str {
         match self {
-            GlimEvent::AppError(_) => "AppError",
-            GlimEvent::AppExit => "AppExit",
-            GlimEvent::AppTick => "AppTick",
-            GlimEvent::ApplyTemporaryFilter(_) => "ApplyTemporaryFilter",
-            GlimEvent::ConfigApply => "ConfigApply",
-            GlimEvent::ConfigClose => "ConfigClose",
-            GlimEvent::ConfigOpen => "ConfigOpen",
-            GlimEvent::ConfigUpdate(_) => "ConfigUpdate",
-            GlimEvent::FilterClear => "FilterClear",
-            GlimEvent::FilterInputBackspace => "FilterInputBackspace",
-            GlimEvent::FilterInputChar(_) => "FilterInputChar",
-            GlimEvent::FilterMenuClose => "FilterMenuClose",
-            GlimEvent::FilterMenuShow => "FilterMenuShow",
-            GlimEvent::GlitchOverride(_) => "GlitchOverride",
-            GlimEvent::InputKey(_) => "InputKey",
-            GlimEvent::JobLogDownloaded(_, _, _) => "JobLogDownloaded",
-            GlimEvent::JobLogFetch(_, _) => "JobLogFetch",
-            GlimEvent::JobOpenUrl(_, _, _) => "JobOpenUrl",
-            GlimEvent::JobsActiveFetch => "JobsActiveFetch",
-            GlimEvent::JobsFetch(_, _) => "JobsFetch",
-            GlimEvent::JobsLoaded(_, _, _) => "JobsLoaded",
-            GlimEvent::LogEntry(_) => "LogEntry",
-            GlimEvent::LogLevelChanged(_) => "LogLevelChanged",
-            GlimEvent::NotificationDismiss => "NotificationDismiss",
-            GlimEvent::NotificationLast => "NotificationLast",
-            GlimEvent::PipelineActionsClose => "PipelineActionsClose",
-            GlimEvent::PipelineActionsOpen(_, _) => "PipelineActionsOpen",
-            GlimEvent::PipelineOpenUrl(_, _) => "PipelineOpenUrl",
-            GlimEvent::PipelineSelected(_) => "PipelineSelected",
-            GlimEvent::PipelinesFetch(_) => "PipelinesFetch",
-            GlimEvent::PipelinesLoaded(_) => "PipelinesLoaded",
-            GlimEvent::ProjectDetailsClose => "ProjectDetailsClose",
-            GlimEvent::ProjectDetailsOpen(_) => "ProjectDetailsOpen",
-            GlimEvent::ProjectFetch(_) => "ProjectFetch",
-            GlimEvent::ProjectNext => "ProjectNext",
-            GlimEvent::ProjectOpenUrl(_) => "ProjectOpenUrl",
-            GlimEvent::ProjectPrevious => "ProjectPrevious",
-            GlimEvent::ProjectSelected(_) => "ProjectSelected",
-            GlimEvent::ProjectUpdated(_) => "ProjectUpdated",
-            GlimEvent::ProjectsFetch => "ProjectsFetch",
-            GlimEvent::ProjectsLoaded(_) => "ProjectsLoaded",
-            GlimEvent::ScreenCapture => "ScreenCapture",
-            GlimEvent::ScreenCaptureToClipboard(_) => "ScreenCaptureToClipboard",
+            GlomEvent::AppError(_) => "AppError",
+            GlomEvent::AppExit => "AppExit",
+            GlomEvent::AppTick => "AppTick",
+            GlomEvent::ApplyTemporaryFilter(_) => "ApplyTemporaryFilter",
+            GlomEvent::ConfigApply => "ConfigApply",
+            GlomEvent::ConfigClose => "ConfigClose",
+            GlomEvent::ConfigOpen => "ConfigOpen",
+            GlomEvent::ConfigUpdate(_) => "ConfigUpdate",
+            GlomEvent::FilterClear => "FilterClear",
+            GlomEvent::FilterInputBackspace => "FilterInputBackspace",
+            GlomEvent::FilterInputChar(_) => "FilterInputChar",
+            GlomEvent::FilterMenuClose => "FilterMenuClose",
+            GlomEvent::FilterMenuShow => "FilterMenuShow",
+            GlomEvent::GlitchOverride(_) => "GlitchOverride",
+            GlomEvent::InputKey(_) => "InputKey",
+            GlomEvent::JobLogDownloaded(_, _, _) => "JobLogDownloaded",
+            GlomEvent::JobLogFetch(_, _) => "JobLogFetch",
+            GlomEvent::JobOpenUrl(_, _, _) => "JobOpenUrl",
+            GlomEvent::JobsActiveFetch => "JobsActiveFetch",
+            GlomEvent::JobsFetch(_, _) => "JobsFetch",
+            GlomEvent::JobsLoaded(_, _, _) => "JobsLoaded",
+            GlomEvent::LogEntry(_) => "LogEntry",
+            GlomEvent::LogLevelChanged(_) => "LogLevelChanged",
+            GlomEvent::NotificationDismiss => "NotificationDismiss",
+            GlomEvent::NotificationLast => "NotificationLast",
+            GlomEvent::PipelineActionsClose => "PipelineActionsClose",
+            GlomEvent::PipelineActionsOpen(_, _) => "PipelineActionsOpen",
+            GlomEvent::PipelineOpenUrl(_, _) => "PipelineOpenUrl",
+            GlomEvent::PipelineSelected(_) => "PipelineSelected",
+            GlomEvent::PipelinesFetch(_) => "PipelinesFetch",
+            GlomEvent::PipelinesLoaded(_) => "PipelinesLoaded",
+            GlomEvent::ProjectDetailsClose => "ProjectDetailsClose",
+            GlomEvent::ProjectDetailsOpen(_) => "ProjectDetailsOpen",
+            GlomEvent::ProjectFetch(_) => "ProjectFetch",
+            GlomEvent::ProjectNext => "ProjectNext",
+            GlomEvent::ProjectOpenUrl(_) => "ProjectOpenUrl",
+            GlomEvent::ProjectPrevious => "ProjectPrevious",
+            GlomEvent::ProjectSelected(_) => "ProjectSelected",
+            GlomEvent::ProjectUpdated(_) => "ProjectUpdated",
+            GlomEvent::ProjectsFetch => "ProjectsFetch",
+            GlomEvent::ProjectsLoaded(_) => "ProjectsLoaded",
+            GlomEvent::ProjectStatisticsFetch(_) => "ProjectStatisticsFetch",
+            GlomEvent::ProjectStatisticsLoaded(_, _) => "ProjectStatisticsLoaded",
+            GlomEvent::ScreenCapture => "ScreenCapture",
+            GlomEvent::ScreenCaptureToClipboard(_) => "ScreenCaptureToClipboard",
         }
     }
 }
@@ -122,13 +126,13 @@ pub enum GlitchState {
 
 #[derive(Debug)]
 pub struct EventHandler {
-    sender: mpsc::Sender<GlimEvent>,
-    receiver: mpsc::Receiver<GlimEvent>,
+    sender: mpsc::Sender<GlomEvent>,
+    receiver: mpsc::Receiver<GlomEvent>,
     _handler: thread::JoinHandle<()>,
 }
 
-pub trait IntoGlimEvent {
-    fn into_glim_event(self) -> GlimEvent;
+pub trait IntoGlomEvent {
+    fn into_glom_event(self) -> GlomEvent;
 }
 
 impl EventHandler {
@@ -149,7 +153,7 @@ impl EventHandler {
                     }
 
                     if last_tick.elapsed() >= tick_rate {
-                        sender.dispatch(GlimEvent::AppTick);
+                        sender.dispatch(GlomEvent::AppTick);
                         last_tick = std::time::Instant::now();
                     }
                 }
@@ -159,22 +163,22 @@ impl EventHandler {
         Self { sender, receiver, _handler: handler }
     }
 
-    pub fn sender(&self) -> mpsc::Sender<GlimEvent> {
+    pub fn sender(&self) -> mpsc::Sender<GlomEvent> {
         self.sender.clone()
     }
 
-    pub fn next(&self) -> Result<GlimEvent, mpsc::RecvError> {
+    pub fn next(&self) -> Result<GlomEvent, mpsc::RecvError> {
         self.receiver.recv()
     }
 
-    pub fn try_next(&self) -> Option<GlimEvent> {
+    pub fn try_next(&self) -> Option<GlomEvent> {
         self.receiver.try_recv().ok()
     }
 
-    fn apply_event(sender: &mpsc::Sender<GlimEvent>) {
+    fn apply_event(sender: &mpsc::Sender<GlomEvent>) {
         match event::read().expect("unable to read event") {
             CrosstermEvent::Key(e) if e.kind == KeyEventKind::Press => {
-                sender.send(GlimEvent::InputKey(e))
+                sender.send(GlomEvent::InputKey(e))
             },
 
             _ => Ok(()),
@@ -183,40 +187,40 @@ impl EventHandler {
     }
 }
 
-impl From<Vec<ProjectDto>> for GlimEvent {
+impl From<Vec<ProjectDto>> for GlomEvent {
     fn from(projects: Vec<ProjectDto>) -> Self {
-        GlimEvent::ProjectsLoaded(projects)
+        GlomEvent::ProjectsLoaded(projects)
     }
 }
 
-impl From<Vec<PipelineDto>> for GlimEvent {
+impl From<Vec<PipelineDto>> for GlomEvent {
     fn from(pipelines: Vec<PipelineDto>) -> Self {
-        GlimEvent::PipelinesLoaded(pipelines)
+        GlomEvent::PipelinesLoaded(pipelines)
     }
 }
 
-impl From<(ProjectId, PipelineId, Vec<JobDto>)> for GlimEvent {
+impl From<(ProjectId, PipelineId, Vec<JobDto>)> for GlomEvent {
     fn from(value: (ProjectId, PipelineId, Vec<JobDto>)) -> Self {
         let (project_id, pipeline_id, jobs) = value;
-        GlimEvent::JobsLoaded(project_id, pipeline_id, jobs)
+        GlomEvent::JobsLoaded(project_id, pipeline_id, jobs)
     }
 }
 
-impl IntoGlimEvent for Vec<ProjectDto> {
-    fn into_glim_event(self) -> GlimEvent {
-        GlimEvent::ProjectsLoaded(self)
+impl IntoGlomEvent for Vec<ProjectDto> {
+    fn into_glom_event(self) -> GlomEvent {
+        GlomEvent::ProjectsLoaded(self)
     }
 }
 
-impl IntoGlimEvent for Vec<PipelineDto> {
-    fn into_glim_event(self) -> GlimEvent {
-        GlimEvent::PipelinesLoaded(self)
+impl IntoGlomEvent for Vec<PipelineDto> {
+    fn into_glom_event(self) -> GlomEvent {
+        GlomEvent::PipelinesLoaded(self)
     }
 }
 
-impl IntoGlimEvent for (ProjectId, PipelineId, Vec<JobDto>) {
-    fn into_glim_event(self) -> GlimEvent {
+impl IntoGlomEvent for (ProjectId, PipelineId, Vec<JobDto>) {
+    fn into_glom_event(self) -> GlomEvent {
         let (project_id, pipeline_id, jobs) = self;
-        GlimEvent::JobsLoaded(project_id, pipeline_id, jobs)
+        GlomEvent::JobsLoaded(project_id, pipeline_id, jobs)
     }
 }

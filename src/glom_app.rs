@@ -7,27 +7,27 @@ use tachyonfx::{Duration, RefRect};
 use tracing::{debug, info, instrument, warn};
 
 use crate::{
-    client::{ClientConfig, GitlabService},
+    client::{ClientConfig, GithubService},
     config::save_config,
     dispatcher::Dispatcher,
     domain::Project,
     effect_registry::EffectRegistry,
-    event::GlimEvent,
+    event::GlomEvent,
     id::ProjectId,
-    input::{processor::NormalModeProcessor, InputMultiplexer},
+    input::{InputMultiplexer, processor::NormalModeProcessor},
     logging::LoggingReloadHandle,
     notice_service::{Notice, NoticeLevel, NoticeService},
-    result::GlimError,
-    stores::{log_event, ProjectStore},
-    ui::{widget::NotificationState, StatefulWidgets},
+    result::GlomError,
+    stores::{ProjectStore, log_event},
+    ui::{StatefulWidgets, widget::NotificationState},
 };
 
-pub struct GlimApp {
+pub struct GlomApp {
     running: bool,
     config_path: PathBuf,
-    gitlab: GitlabService,
+    github: GithubService,
     last_tick: std::time::Instant,
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     project_store: ProjectStore,
     notices: NoticeService,
     input: InputMultiplexer,
@@ -37,11 +37,11 @@ pub struct GlimApp {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct GlimConfig {
-    /// The URL of the GitLab instance
-    pub gitlab_url: CompactString,
-    /// The Personal Access Token to authenticate with GitLab
-    pub gitlab_token: CompactString,
+pub struct GlomConfig {
+    /// The URL of the GitHub instance
+    pub github_url: CompactString,
+    /// The Personal Access Token to authenticate with GitHub
+    pub github_token: CompactString,
     /// Filter applied to the projects list
     pub search_filter: Option<CompactString>,
     /// Logging level: Off, Error, Warn, Info, Debug, Trace
@@ -51,11 +51,11 @@ pub struct GlimConfig {
     pub animations: bool,
 }
 
-impl Default for GlimConfig {
+impl Default for GlomConfig {
     fn default() -> Self {
         Self {
-            gitlab_url: "https://".into(),
-            gitlab_token: "".into(),
+            github_url: "https://api.github.com".into(),
+            github_token: "".into(),
             search_filter: None,
             log_level: Some("Error".into()),
             animations: true,
@@ -63,13 +63,13 @@ impl Default for GlimConfig {
     }
 }
 
-impl GlimApp {
+impl GlomApp {
     pub fn new(
-        sender: Sender<GlimEvent>,
+        sender: Sender<GlomEvent>,
         config_path: PathBuf,
-        gitlab: GitlabService,
+        github: GithubService,
         log_reload_handle: LoggingReloadHandle,
-        config: &GlimConfig,
+        config: &GlomConfig,
     ) -> Self {
         let mut input = InputMultiplexer::new(sender.clone());
         input.push(Box::new(NormalModeProcessor::new(sender.clone())));
@@ -84,7 +84,7 @@ impl GlimApp {
         Self {
             running: true,
             config_path,
-            gitlab,
+            github,
             last_tick: std::time::Instant::now(),
             sender: sender.clone(),
             project_store: ProjectStore::new(sender),
@@ -99,7 +99,7 @@ impl GlimApp {
     #[instrument(skip(self, event, ui, effects), fields(event_type = %event.variant_name()))]
     pub fn apply(
         &mut self,
-        event: GlimEvent,
+        event: GlomEvent,
         ui: &mut StatefulWidgets,
         effects: &mut EffectRegistry,
     ) {
@@ -110,25 +110,25 @@ impl GlimApp {
         self.project_store.apply(&event);
 
         match event {
-            GlimEvent::AppExit => self.running = false,
+            GlomEvent::AppExit => self.running = false,
 
             // www
-            GlimEvent::ProjectOpenUrl(id) => {
+            GlomEvent::ProjectOpenUrl(id) => {
                 debug!(project_id = %id, "Opening project in browser");
                 open::that(&self.project(id).url).expect("unable to open browser")
             },
-            GlimEvent::PipelineOpenUrl(project_id, pipeline_id) => {
+            GlomEvent::PipelineOpenUrl(project_id, pipeline_id) => {
                 debug!(project_id = %project_id, pipeline_id = %pipeline_id, "Opening pipeline in browser");
-                let project = self.project(project_id);
+                let project = self.project(project_id.clone());
                 let pipeline = project
                     .pipeline(pipeline_id)
                     .expect("pipeline not found");
 
                 open::that(&pipeline.url).expect("unable to open browser");
             },
-            GlimEvent::JobOpenUrl(project_id, pipeline_id, job_id) => {
+            GlomEvent::JobOpenUrl(project_id, pipeline_id, job_id) => {
                 debug!(project_id = %project_id, pipeline_id = %pipeline_id, job_id = %job_id, "Opening job in browser");
-                let project = self.project(project_id);
+                let project = self.project(project_id.clone());
                 let job_url = project
                     .pipeline(pipeline_id)
                     .and_then(|p| p.job(job_id))
@@ -138,9 +138,9 @@ impl GlimApp {
                 open::that(job_url).expect("unable to open browser");
             },
 
-            GlimEvent::JobLogFetch(project_id, pipeline_id) => {
+            GlomEvent::JobLogFetch(project_id, pipeline_id) => {
                 debug!(project_id = %project_id, pipeline_id = %pipeline_id, "Downloading error log");
-                let project = self.project(project_id);
+                let project = self.project(project_id.clone());
                 let pipeline = project
                     .pipeline(pipeline_id)
                     .expect("pipeline not found");
@@ -149,15 +149,15 @@ impl GlimApp {
                     .failed_job()
                     .expect("no failed job found");
 
-                self.gitlab
+                self.github
                     .spawn_download_job_log(project_id, job.id);
             },
-            GlimEvent::JobLogDownloaded(project_id, job_id, trace) => {
+            GlomEvent::JobLogDownloaded(project_id, job_id, trace) => {
                 info!(project_id = %project_id, job_id = %job_id, trace_length = trace.len(), "Job log downloaded and copied to clipboard");
                 self.clipboard.set_text(trace).unwrap();
             },
 
-            GlimEvent::JobsActiveFetch => {
+            GlomEvent::JobsActiveFetch => {
                 debug!("Requesting active jobs for all projects");
                 self.project_store
                     .sorted_projects()
@@ -165,13 +165,16 @@ impl GlimApp {
                     .flat_map(|p| p.pipelines.iter())
                     .flatten()
                     .filter(|p| p.status.is_active() || p.has_active_jobs())
-                    .for_each(|p| self.gitlab.spawn_fetch_jobs(p.project_id, p.id));
+                    .for_each(|p| {
+                        self.github
+                            .spawn_fetch_jobs(p.project_id.clone(), p.id)
+                    });
             },
-            GlimEvent::PipelinesFetch(id) => {
+            GlomEvent::PipelinesFetch(id) => {
                 debug!(project_id = %id, "Requesting pipelines for project");
-                self.gitlab.spawn_fetch_pipelines(id, None)
+                self.github.spawn_fetch_pipelines(id, None)
             },
-            GlimEvent::ProjectsFetch => {
+            GlomEvent::ProjectsFetch => {
                 let latest_activity = self
                     .project_store
                     .sorted_projects()
@@ -188,61 +191,66 @@ impl GlimApp {
                     .map(|p| p.last_activity_at)
                     .map_or_else(|| latest_activity, Some);
 
-                self.gitlab.spawn_fetch_projects(updated_after)
+                self.github.spawn_fetch_projects(updated_after)
             },
-            GlimEvent::JobsFetch(project_id, pipeline_id) => {
+            GlomEvent::JobsFetch(project_id, pipeline_id) => {
                 debug!(project_id = %project_id, pipeline_id = %pipeline_id, "Requesting jobs for pipeline");
-                self.gitlab
+                self.github
                     .spawn_fetch_jobs(project_id, pipeline_id)
+            },
+            GlomEvent::ProjectStatisticsFetch(project_id) => {
+                debug!(project_id = %project_id, "Requesting repository statistics");
+                self.github
+                    .spawn_fetch_repository_statistics(project_id)
             },
 
             // configuration
-            GlimEvent::ConfigUpdate(config) => {
+            GlomEvent::ConfigUpdate(config) => {
                 let client_config = ClientConfig::from(config.clone())
-                    .with_debug_logging(self.gitlab.config().debug.log_responses);
-                let _ = self.gitlab.update_config(client_config);
+                    .with_debug_logging(self.github.config().debug.log_responses);
+                let _ = self.github.update_config(client_config);
 
                 // Update logging level
                 if let Some(ref log_level_str) = config.log_level {
                     self.update_logging_level(log_level_str);
                 }
             },
-            GlimEvent::LogLevelChanged(level) => {
+            GlomEvent::LogLevelChanged(level) => {
                 info!("Log level changed to: {:?}", level);
                 // Event is primarily for user confirmation - actual level change is
                 // handled in update_logging_level
             },
-            GlimEvent::ConfigApply => {
+            GlomEvent::ConfigApply => {
                 if let Some(config_popup) = ui.config_popup_state.as_ref() {
                     let config = config_popup.to_config();
                     let client_config = ClientConfig::from(config.clone())
-                        .with_debug_logging(self.gitlab.config().debug.log_responses);
+                        .with_debug_logging(self.github.config().debug.log_responses);
 
                     // Pre-validate configuration before attempting to connect
                     if let Err(validation_error) = client_config.validate() {
-                        let glim_error = GlimError::from(&validation_error);
-                        self.dispatch(GlimEvent::AppError(glim_error));
+                        let glom_error = GlomError::from(&validation_error);
+                        self.dispatch(GlomEvent::AppError(glom_error));
                         return;
                     }
 
                     // Create a temporary service for connection validation
-                    match self.gitlab.update_config(client_config) {
+                    match self.github.update_config(client_config) {
                         Ok(_) => {
                             save_config(&self.config_path, config.clone())
                                 .expect("failed to save config");
-                            self.dispatch(GlimEvent::ConfigUpdate(config));
-                            self.dispatch(GlimEvent::ConfigClose);
-                            self.dispatch(GlimEvent::ProjectsFetch);
+                            self.dispatch(GlomEvent::ConfigUpdate(config));
+                            self.dispatch(GlomEvent::ConfigClose);
+                            self.dispatch(GlomEvent::ProjectsFetch);
                         },
                         Err(e) => {
-                            let glim_error = GlimError::config_connection_error(e.to_string());
-                            self.dispatch(GlimEvent::AppError(glim_error));
+                            let glom_error = GlomError::config_connection_error(e.to_string());
+                            self.dispatch(GlomEvent::AppError(glom_error));
                         },
                     }
                 }
             },
 
-            GlimEvent::NotificationLast => {
+            GlomEvent::NotificationLast => {
                 if let Some(notice) = self.notices.last_notification() {
                     let content_area = RefRect::new(Rect::default());
                     effects.register_notification_effect(content_area.clone());
@@ -254,24 +262,24 @@ impl GlimApp {
                 }
             },
 
-            GlimEvent::NotificationDismiss => {
+            GlomEvent::NotificationDismiss => {
                 ui.notice = None;
             },
 
-            GlimEvent::FilterMenuShow => {
+            GlomEvent::FilterMenuShow => {
                 // Initialize filter input with the current temporary filter
                 // The show_filter_input method will handle initialization
                 ui.filter_input_active = true;
             },
 
-            GlimEvent::ScreenCapture => {
+            GlomEvent::ScreenCapture => {
                 debug!("Screen capture requested");
                 // The actual screen capture will be handled in the rendering loop
                 // where we have access to the frame buffer
                 ui.capture_screen_requested = true;
             },
 
-            GlimEvent::ScreenCaptureToClipboard(ansi_string) => {
+            GlomEvent::ScreenCaptureToClipboard(ansi_string) => {
                 debug!("Copying screen capture to clipboard");
                 match self.clipboard.set_text(ansi_string) {
                     Ok(_) => {
@@ -312,15 +320,15 @@ impl GlimApp {
         }
     }
 
-    pub fn load_config(&self) -> Result<GlimConfig, GlimError> {
+    pub fn load_config(&self) -> Result<GlomConfig, GlomError> {
         let config_file = &self.config_path;
         if config_file.exists() {
-            let config: GlimConfig = confy::load_path(config_file)
-                .map_err(|e| GlimError::config_load_error(config_file.clone(), e))?;
+            let config: GlomConfig = confy::load_path(config_file)
+                .map_err(|e| GlomError::config_load_error(config_file.clone(), e))?;
 
             Ok(config)
         } else {
-            Err(GlimError::config_file_not_found(config_file.clone()))
+            Err(GlomError::config_file_not_found(config_file.clone()))
         }
     }
 
@@ -351,35 +359,35 @@ impl GlimApp {
     ) -> (Vec<Project>, Vec<usize>) {
         let all_projects = self.project_store.sorted_projects();
 
-        if let Some(filter) = temporary_filter {
-            if !filter.trim().is_empty() {
-                let filter_lower = filter.to_lowercase();
-                let mut filtered_projects = Vec::new();
-                let mut filtered_indices = Vec::new();
+        if let Some(filter) = temporary_filter
+            && !filter.trim().is_empty()
+        {
+            let filter_lower = filter.to_lowercase();
+            let mut filtered_projects = Vec::new();
+            let mut filtered_indices = Vec::new();
 
-                for (index, project) in all_projects.iter().enumerate() {
-                    if project
-                        .path
-                        .to_lowercase()
-                        .contains(filter_lower.as_str())
-                        || project
-                            .description
-                            .as_ref()
-                            .is_some_and(|d| d.to_lowercase().contains(filter_lower.as_str()))
-                    {
-                        filtered_projects.push(project.clone());
-                        filtered_indices.push(index);
-                    }
+            for (index, project) in all_projects.iter().enumerate() {
+                if project
+                    .path
+                    .to_lowercase()
+                    .contains(filter_lower.as_str())
+                    || project
+                        .description
+                        .as_ref()
+                        .is_some_and(|d| d.to_lowercase().contains(filter_lower.as_str()))
+                {
+                    filtered_projects.push(project.clone());
+                    filtered_indices.push(index);
                 }
-
-                return (filtered_projects, filtered_indices);
             }
+
+            return (filtered_projects, filtered_indices);
         }
 
         (all_projects.to_vec(), (0..all_projects.len()).collect())
     }
 
-    pub fn sender(&self) -> Sender<GlimEvent> {
+    pub fn sender(&self) -> Sender<GlomEvent> {
         self.sender.clone()
     }
 
@@ -418,13 +426,13 @@ impl GlimApp {
             self.current_log_level = level;
 
             // Dispatch confirmation event to user
-            self.dispatch(GlimEvent::LogLevelChanged(level));
+            self.dispatch(GlomEvent::LogLevelChanged(level));
         }
     }
 }
 
-impl Dispatcher for GlimApp {
-    fn dispatch(&self, event: GlimEvent) {
+impl Dispatcher for GlomApp {
+    fn dispatch(&self, event: GlomEvent) {
         self.sender.send(event).unwrap_or(());
     }
 }

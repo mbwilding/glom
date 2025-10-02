@@ -14,15 +14,15 @@ use crate::{
     ui::{fx::popup_window, popup::utility::CenteredShrink, widget::PipelineTable},
 };
 
-/// project details popup
+/// Project details popup
 pub struct ProjectDetailsPopup {}
 
-/// state of the project details popup
+/// State of the project details popup
 pub struct ProjectDetailsPopupState {
     pub project: Project,
     project_namespace: Text<'static>,
     project_stat_summary: Text<'static>,
-    pub pipelines: PipelineTable, // widget
+    pub pipelines: PipelineTable,
     pub pipelines_table_state: TableState,
     pub popup_area: RefRect,
 }
@@ -40,21 +40,24 @@ impl ProjectDetailsPopupState {
 
     pub fn new(project: Project, popup_area: RefRect) -> ProjectDetailsPopupState {
         let (namespace, name) = project.path_and_name();
+
         let description = match &project.description {
             Some(d) => d.to_string(),
             None => String::new(),
         };
+
         let project_namespace = Text::from(vec![
             Line::from(name.to_string()).style(theme().project_name),
-            Line::from(namespace.to_string()).style(theme().project_parents),
+            Line::from(namespace.trim_end_matches('/').to_string()).style(theme().project_parents),
             Line::from(description).style(theme().project_description),
         ]);
 
-        let project_stat_summary = Text::from(vec![
-            Self::commit_count_line(project.commit_count),
-            Self::storage_size_line(project.repo_size_kb, "in repository"),
-            Self::storage_size_line(project.artifacts_size_kb, "in artifacts"),
-        ]);
+        let project_stat_summary = Self::create_stats_text(
+            project.commit_count,
+            project.repo_size_kb,
+            project.artifacts_size_kb,
+            project.statistics_loading,
+        );
 
         let pipelines: Vec<&Pipeline> = project.recent_pipelines();
         let pipelines = PipelineTable::new(&pipelines);
@@ -69,22 +72,79 @@ impl ProjectDetailsPopupState {
         }
     }
 
-    fn commit_count_line(commit_count: u32) -> Line<'static> {
-        Line::from(vec![
-            Span::from(commit_count.to_compact_string()).style(theme().project_commits[0]),
-            Span::from(" commits").style(theme().project_commits[1]),
+    fn create_stats_text(
+        commit_count: u32,
+        repo_size_kb: u64,
+        artifacts_size_kb: u64,
+        loading: bool,
+    ) -> Text<'static> {
+        let commits_value = if loading && commit_count == 0 {
+            "···"
+        } else {
+            &commit_count.to_compact_string()
+        };
+
+        let repo_size_value = if loading && repo_size_kb == 0 {
+            "···"
+        } else {
+            &Self::format_size(repo_size_kb)
+        };
+
+        let artifacts_size_value = if loading && artifacts_size_kb == 0 {
+            "···"
+        } else {
+            &Self::format_size(artifacts_size_kb)
+        };
+
+        let width = 22;
+
+        Text::from(vec![
+            Self::create_aligned_line("Commits:", commits_value, width, theme().project_commits),
+            Self::create_aligned_line("Repository:", repo_size_value, width, theme().project_size),
+            Self::create_aligned_line(
+                "Artifacts:",
+                artifacts_size_value,
+                width,
+                theme().project_size,
+            ),
         ])
     }
 
-    fn storage_size_line(size_kb: u64, label: &str) -> Line<'static> {
-        let size = size_kb;
-        let (size, unit) = match size {
-            s if s < 1024 => (s as f32, "kb"),
-            s if s < 1024 * 1024 => (s as f32 / 1024.0, "mb"),
-            s => (s as f32 / (1024.0 * 1024.0), "gb"),
-        };
+    fn create_aligned_line(
+        label: &str,
+        value: &str,
+        width: usize,
+        styles: [ratatui::style::Style; 2],
+    ) -> Line<'static> {
+        let label_len = label.len();
+        let value_len = value.len();
+        let total_content = label_len + value_len;
 
-        Line::from(format!("{size:.2}{unit} {label}")).style(theme().project_size[0])
+        if total_content >= width {
+            Line::from(vec![
+                Span::from(label.to_string()).style(styles[1]),
+                Span::from(" ").style(styles[1]),
+                Span::from(value.to_string()).style(styles[0]),
+            ])
+        } else {
+            let spacing = width - total_content;
+            let spaces = " ".repeat(spacing);
+
+            Line::from(vec![
+                Span::from(label.to_string()).style(styles[1]),
+                Span::from(spaces).style(styles[1]),
+                Span::from(value.to_string()).style(styles[0]),
+            ])
+        }
+    }
+
+    fn format_size(size_kb: u64) -> String {
+        let (size, unit) = match size_kb {
+            s if s < 1024 => (s as f32, "KB"),
+            s if s < 1024 * 1024 => (s as f32 / 1024.0, "MB"),
+            s => (s as f32 / (1024.0 * 1024.0), "GB"),
+        };
+        format!("{size:.2} {unit}")
     }
 
     pub fn update_popup_area(&self, screen: Rect) -> Rect {
@@ -135,6 +195,7 @@ impl StatefulWidget for ProjectDetailsPopup {
             .project_namespace
             .clone()
             .render(project_details_layout[0], buf);
+
         state
             .project_stat_summary
             .clone()

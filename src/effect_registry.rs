@@ -1,7 +1,7 @@
-//! Visual effects registry for the Glim TUI application.
+//! Visual effects registry for the Glom TUI application.
 //!
 //! This module provides the central coordination system for all visual effects
-//! in Glim, built on top of the tachyonfx library. It manages popup animations,
+//! in Glom, built on top of the tachyonfx library. It manages popup animations,
 //! glitch effects, notifications, and screen transitions with a unified interface.
 //!
 //! # Architecture
@@ -23,8 +23,8 @@
 //!
 //! ```rust
 //! # use std::sync::mpsc;
-//! # use glim::effect_registry::EffectRegistry;
-//! # use glim::event::GlimEvent;
+//! # use glom::effect_registry::EffectRegistry;
+//! # use glom::event::GlomEvent;
 //!
 //! let (sender, _receiver) = mpsc::channel();
 //! let mut registry = EffectRegistry::new(sender);
@@ -44,13 +44,13 @@ use ratatui::{
     style::Color,
 };
 use tachyonfx::{
-    fx::*,
     CellFilter::{AllOf, Inner, Not, Outer, RefArea, Text},
     Duration, Effect, EffectManager, Interpolation, IntoEffect, Motion, RefRect,
+    fx::*,
 };
 
 use crate::{
-    event::{GlimEvent, GlitchState},
+    event::{GlitchState, GlomEvent},
     gruvbox::Gruvbox::{Dark0, Dark0Hard, Dark3},
 };
 
@@ -74,7 +74,7 @@ pub enum FxId {
     ProjectDetailsPopup,
 }
 
-/// Central registry for managing visual effects in the Glim TUI application.
+/// Central registry for managing visual effects in the Glom TUI application.
 ///
 /// The `EffectRegistry` coordinates all visual effects using the tachyonfx library,
 /// providing a unified interface for registering, updating, and processing effects.
@@ -98,7 +98,7 @@ pub struct EffectRegistry {
     /// Internal effect manager from tachyonfx
     effects: EffectManager<FxId>,
     /// Channel for dispatching events back to the application
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     /// Reference to the current screen area for layout-aware effects
     screen_area: RefRect,
     /// Whether animations are enabled
@@ -115,7 +115,7 @@ impl EffectRegistry {
     /// # Returns
     ///
     /// A new `EffectRegistry` instance ready to manage visual effects
-    pub fn new(sender: Sender<GlimEvent>) -> Self {
+    pub fn new(sender: Sender<GlomEvent>) -> Self {
         Self {
             effects: EffectManager::default(),
             screen_area: RefRect::default(),
@@ -139,8 +139,8 @@ impl EffectRegistry {
     /// - `CloseProjectDetails`: Initiates project details popup close animation
     /// - `ClosePipelineActions`: Initiates pipeline actions popup close animation
     /// - `CloseConfig`: Initiates config popup close animation
-    pub fn apply(&mut self, event: &GlimEvent) {
-        use GlimEvent::*;
+    pub fn apply(&mut self, event: &GlomEvent) {
+        use GlomEvent::*;
         match event {
             GlitchOverride(g) => self.register_glitch_effect(*g),
             ProjectDetailsClose => self.register_close_popup(FxId::ProjectDetailsPopup),
@@ -361,7 +361,7 @@ impl EffectRegistry {
             // dynamically track area size in case of window resizing
             dynamic_area(content_area, main_fx),
             // lastly, dispatch a close notification event
-            self.dispatch(GlimEvent::NotificationDismiss),
+            self.dispatch(GlomEvent::NotificationDismiss),
         ]);
 
         self.add_unique(FxId::Notification, fx);
@@ -376,7 +376,7 @@ impl EffectRegistry {
     /// # Returns
     ///
     /// An effect that sends the event when executed
-    fn dispatch(&mut self, event: GlimEvent) -> Effect {
+    fn dispatch(&mut self, event: GlomEvent) -> Effect {
         dispatch_event(self.sender.clone(), event)
     }
 

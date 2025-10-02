@@ -1,13 +1,13 @@
 use std::sync::mpsc;
 
-use crate::event::GlimEvent;
+use crate::event::GlomEvent;
 
 pub trait Dispatcher {
-    fn dispatch(&self, event: GlimEvent);
+    fn dispatch(&self, event: GlomEvent);
 }
 
-impl Dispatcher for mpsc::Sender<GlimEvent> {
-    fn dispatch(&self, event: GlimEvent) {
+impl Dispatcher for mpsc::Sender<GlomEvent> {
+    fn dispatch(&self, event: GlomEvent) {
         let _ = self.send(event);
     }
 }

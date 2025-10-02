@@ -4,20 +4,20 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::{
     dispatcher::Dispatcher,
-    event::GlimEvent,
+    event::GlomEvent,
     id::{PipelineId, ProjectId},
     input::InputProcessor,
     ui::StatefulWidgets,
 };
 
 pub struct ProjectDetailsProcessor {
-    sender: Sender<GlimEvent>,
+    sender: Sender<GlomEvent>,
     project_id: ProjectId,
     selected: Option<PipelineId>,
 }
 
 impl ProjectDetailsProcessor {
-    pub fn new(sender: Sender<GlimEvent>, project_id: ProjectId) -> Self {
+    pub fn new(sender: Sender<GlomEvent>, project_id: ProjectId) -> Self {
         Self { sender, project_id, selected: None }
     }
 
@@ -25,39 +25,39 @@ impl ProjectDetailsProcessor {
         match event.code {
             KeyCode::Esc => self
                 .sender
-                .dispatch(GlimEvent::ProjectDetailsClose),
+                .dispatch(GlomEvent::ProjectDetailsClose),
             KeyCode::Char('q') => self
                 .sender
-                .dispatch(GlimEvent::ProjectDetailsClose),
+                .dispatch(GlomEvent::ProjectDetailsClose),
             KeyCode::Up => ui.handle_pipeline_selection(-1),
             KeyCode::Down => ui.handle_pipeline_selection(1),
             KeyCode::Char('k') => ui.handle_pipeline_selection(-1),
             KeyCode::Char('j') => ui.handle_pipeline_selection(1),
             KeyCode::Enter if self.selected.is_some() => {
                 self.sender
-                    .dispatch(GlimEvent::PipelineActionsOpen(
-                        self.project_id,
+                    .dispatch(GlomEvent::PipelineActionsOpen(
+                        self.project_id.clone(),
                         self.selected.unwrap(),
                     ))
             },
             KeyCode::Char('o') if self.selected.is_some() => {
                 self.sender
-                    .dispatch(GlimEvent::PipelineActionsOpen(
-                        self.project_id,
+                    .dispatch(GlomEvent::PipelineActionsOpen(
+                        self.project_id.clone(),
                         self.selected.unwrap(),
                     ))
             },
-            KeyCode::F(12) => self.sender.dispatch(GlimEvent::ScreenCapture),
+            KeyCode::F(12) => self.sender.dispatch(GlomEvent::ScreenCapture),
             _ => (),
         }
     }
 }
 
 impl InputProcessor for ProjectDetailsProcessor {
-    fn apply(&mut self, event: &GlimEvent, ui: &mut StatefulWidgets) {
+    fn apply(&mut self, event: &GlomEvent, ui: &mut StatefulWidgets) {
         match event {
-            GlimEvent::PipelineSelected(pipeline) => self.selected = Some(*pipeline),
-            GlimEvent::InputKey(e) => self.process(e, ui),
+            GlomEvent::PipelineSelected(pipeline) => self.selected = Some(*pipeline),
+            GlomEvent::InputKey(e) => self.process(e, ui),
             _ => (),
         }
     }

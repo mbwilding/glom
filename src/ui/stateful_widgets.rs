@@ -8,8 +8,8 @@ use crate::{
     dispatcher::Dispatcher,
     domain::Project,
     effect_registry::EffectRegistry,
-    event::GlimEvent,
-    glim_app::{GlimApp, GlimConfig, Modulo},
+    event::GlomEvent,
+    glom_app::{GlomApp, GlomConfig, Modulo},
     id::PipelineId,
     ui::{
         popup::{ConfigPopupState, PipelineActionsPopupState, ProjectDetailsPopupState},
@@ -19,7 +19,7 @@ use crate::{
 
 pub struct StatefulWidgets {
     pub last_frame: Duration,
-    pub sender: Sender<GlimEvent>,
+    pub sender: Sender<GlomEvent>,
     pub project_table_state: TableState,
     pub config_popup_state: Option<ConfigPopupState>,
     pub project_details: Option<ProjectDetailsPopupState>,
@@ -33,7 +33,7 @@ pub struct StatefulWidgets {
 }
 
 impl StatefulWidgets {
-    pub fn new(sender: Sender<GlimEvent>) -> Self {
+    pub fn new(sender: Sender<GlomEvent>) -> Self {
         Self {
             last_frame: Duration::default(),
             sender,
@@ -50,43 +50,43 @@ impl StatefulWidgets {
         }
     }
 
-    pub fn apply(&mut self, app: &GlimApp, effects: &mut EffectRegistry, event: &GlimEvent) {
+    pub fn apply(&mut self, app: &GlomApp, effects: &mut EffectRegistry, event: &GlomEvent) {
         match event {
-            GlimEvent::ProjectNext => self.handle_project_selection(1, app),
-            GlimEvent::ProjectPrevious => self.handle_project_selection(-1, app),
-            GlimEvent::ProjectsLoaded(_) => {
+            GlomEvent::ProjectNext => self.handle_project_selection(1, app),
+            GlomEvent::ProjectPrevious => self.handle_project_selection(-1, app),
+            GlomEvent::ProjectsLoaded(_) => {
                 let exclude_area_from_fx = self.current_popup_area();
                 effects.register_projects_table_new_data(exclude_area_from_fx)
             },
-            GlimEvent::ProjectDetailsOpen(id) => {
+            GlomEvent::ProjectDetailsOpen(id) => {
                 let popup_area = RefRect::default();
                 effects.register_project_details(popup_area.clone());
-                self.open_project_details(app.project(*id).clone(), popup_area, app.sender())
+                self.open_project_details(app.project(id.clone()).clone(), popup_area, app.sender())
             },
-            GlimEvent::ProjectDetailsClose => self.project_details = None,
-            GlimEvent::ProjectUpdated(p) => self.refresh_project_details(p),
+            GlomEvent::ProjectDetailsClose => self.project_details = None,
+            GlomEvent::ProjectUpdated(p) => self.refresh_project_details(p),
 
-            GlimEvent::PipelineActionsClose => self.close_pipeline_actions(),
-            GlimEvent::PipelineActionsOpen(project_id, pipeline_id) => {
+            GlomEvent::PipelineActionsClose => self.close_pipeline_actions(),
+            GlomEvent::PipelineActionsOpen(project_id, pipeline_id) => {
                 let popup_area = RefRect::default();
                 effects.register_pipeline_actions(popup_area.clone());
-                let project = app.project(*project_id);
+                let project = app.project(project_id.clone());
                 self.open_pipeline_actions(project, *pipeline_id, popup_area);
             },
 
-            GlimEvent::ConfigOpen => {
+            GlomEvent::ConfigOpen => {
                 let popup_area = RefRect::default();
                 effects.register_config_popup(popup_area.clone());
                 self.open_config(app.load_config().unwrap_or_default(), popup_area);
             },
-            GlimEvent::ConfigClose => self.config_popup_state = None,
+            GlomEvent::ConfigClose => self.config_popup_state = None,
 
-            GlimEvent::FilterMenuShow => self.show_filter_input(),
-            GlimEvent::FilterMenuClose => self.close_filter_input(),
-            GlimEvent::FilterInputChar(c) => self.add_filter_char(c),
-            GlimEvent::FilterInputBackspace => self.remove_filter_char(),
-            GlimEvent::FilterClear => self.clear_filter(),
-            GlimEvent::ApplyTemporaryFilter(filter) => self.apply_temporary_filter(filter.clone()),
+            GlomEvent::FilterMenuShow => self.show_filter_input(),
+            GlomEvent::FilterMenuClose => self.close_filter_input(),
+            GlomEvent::FilterInputChar(c) => self.add_filter_char(c),
+            GlomEvent::FilterInputBackspace => self.remove_filter_char(),
+            GlomEvent::FilterClear => self.clear_filter(),
+            GlomEvent::ApplyTemporaryFilter(filter) => self.apply_temporary_filter(filter.clone()),
 
             _ => (),
         }
@@ -120,18 +120,18 @@ impl StatefulWidgets {
         &mut self,
         project: Project,
         area_tracker: RefRect,
-        sender: Sender<GlimEvent>,
+        sender: Sender<GlomEvent>,
     ) {
         project
             .recent_pipelines()
             .first()
-            .map(|p| sender.dispatch(GlimEvent::PipelineSelected(p.id)))
+            .map(|p| sender.dispatch(GlomEvent::PipelineSelected(p.id)))
             .unwrap_or(());
 
         self.project_details = Some(ProjectDetailsPopupState::new(project, area_tracker));
     }
 
-    fn open_config(&mut self, config: GlimConfig, popup_area: RefRect) {
+    fn open_config(&mut self, config: GlomConfig, popup_area: RefRect) {
         self.config_popup_state = Some(ConfigPopupState::new(config, popup_area));
     }
 
@@ -147,15 +147,15 @@ impl StatefulWidgets {
 
         let actions = if let Some(job) = failed_job {
             vec![
-                GlimEvent::JobOpenUrl(project.id, pipeline_id, job.id),
-                GlimEvent::PipelineOpenUrl(project.id, pipeline_id),
-                GlimEvent::ProjectOpenUrl(project.id),
-                GlimEvent::JobLogFetch(project.id, pipeline_id),
+                GlomEvent::JobOpenUrl(project.id.clone(), pipeline_id, job.id),
+                GlomEvent::PipelineOpenUrl(project.id.clone(), pipeline_id),
+                GlomEvent::ProjectOpenUrl(project.id.clone()),
+                GlomEvent::JobLogFetch(project.id.clone(), pipeline_id),
             ]
         } else {
             vec![
-                GlimEvent::PipelineOpenUrl(project.id, pipeline_id),
-                GlimEvent::ProjectOpenUrl(project.id),
+                GlomEvent::PipelineOpenUrl(project.id.clone(), pipeline_id),
+                GlomEvent::ProjectOpenUrl(project.id.clone()),
             ]
         };
 
@@ -166,7 +166,7 @@ impl StatefulWidgets {
         self.pipeline_actions = None;
     }
 
-    fn handle_project_selection(&mut self, direction: i32, app: &GlimApp) {
+    fn handle_project_selection(&mut self, direction: i32, app: &GlomApp) {
         let all_projects = app.projects();
         let filtered_count = if self.current_filtered_indices.is_empty() {
             all_projects.len()
@@ -196,7 +196,7 @@ impl StatefulWidgets {
             };
 
             let project = &all_projects[project_index];
-            app.dispatch(GlimEvent::ProjectSelected(project.id));
+            app.dispatch(GlomEvent::ProjectSelected(project.id.clone()));
         } else {
             self.project_table_state.select(Some(0));
         }
@@ -219,7 +219,7 @@ impl StatefulWidgets {
                 pd.pipelines_table_state.select(Some(new_index));
                 let pipeline = &pipelines[new_index];
                 self.sender
-                    .dispatch(GlimEvent::PipelineSelected(pipeline.id));
+                    .dispatch(GlomEvent::PipelineSelected(pipeline.id));
             }
         }
     }
@@ -289,7 +289,7 @@ impl StatefulWidgets {
         self.filter_input_active = false;
         self.temporary_filter = None;
         self.sender
-            .dispatch(GlimEvent::ApplyTemporaryFilter(None));
+            .dispatch(GlomEvent::ApplyTemporaryFilter(None));
     }
 
     pub fn effective_filter(&self, config_filter: &Option<CompactString>) -> Option<CompactString> {

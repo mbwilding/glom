@@ -12,6 +12,7 @@ pub struct Theme {
     pub commit_title: Style,
     pub pipeline_source: Style,
     pub pipeline_branch: Style,
+    pub pipeline_name: Style,
     pub pipeline_job: Style,
     pub pipeline_job_failed: Style,
     pub date: Style,
@@ -67,6 +68,9 @@ impl Theme {
                 .add_modifier(Modifier::ITALIC),
             pipeline_source: Style::default().fg(Gruvbox::BlueBright.into()),
             pipeline_branch: Style::default().fg(Gruvbox::Light2.into()),
+            pipeline_name: Style::default()
+                .fg(Gruvbox::Green.into())
+                .add_modifier(Modifier::BOLD),
             pipeline_job: Style::default().fg(Gruvbox::BlueBright.into()),
             pipeline_job_failed: Style::default().fg(Gruvbox::RedBright.into()),
             pipeline_action: Style::default().fg(Gruvbox::Orange.into()),

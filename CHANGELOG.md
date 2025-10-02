@@ -1,5 +1,8 @@
 # Changelog
 
+## glom 0.2.2 - 2025-07-21
+- Forked for GitHub, and renamed to glom
+
 ## glim 0.2.1 - 2025-07-21
 
 ### Changed
@@ -20,7 +23,7 @@
 - Updated to use CompactString for better performance
 - Migrated to color-eyre for error handling
 - Updated tachyonfx and ratatui dependencies
-- Log files now saved to OS-appropriate cache directories (Linux: ~/.cache/glim, macOS: ~/Library/Caches/glim, Windows: %LOCALAPPDATA%\glim\cache)
+- Log files now saved to OS-appropriate cache directories (Linux: ~/.cache/glom, macOS: ~/Library/Caches/glim, Windows: %LOCALAPPDATA%\glim\cache)
 
 ### Fixed
 - Fixed application panic issues

@@ -7,7 +7,7 @@ use ratatui::{
 use tachyonfx::RefRect;
 
 use crate::{
-    event::GlimEvent,
+    event::GlomEvent,
     theme::theme,
     ui::{fx::popup_window, popup::utility::CenteredShrink},
 };
@@ -17,13 +17,13 @@ pub struct PipelineActionsPopup {}
 
 /// state of the pipeline actions popup
 pub struct PipelineActionsPopupState {
-    pub actions: Vec<GlimEvent>,
+    pub actions: Vec<GlomEvent>,
     pub list_state: ListState,
     pub popup_area: RefRect,
 }
 
 impl PipelineActionsPopupState {
-    pub fn new(actions: Vec<GlimEvent>, popup_area: RefRect) -> Self {
+    pub fn new(actions: Vec<GlomEvent>, popup_area: RefRect) -> Self {
         Self {
             actions,
             list_state: ListState::default().with_selected(Some(0)),
@@ -31,7 +31,7 @@ impl PipelineActionsPopupState {
         }
     }
 
-    pub fn copy_selected_action(&self, selected_action: usize) -> GlimEvent {
+    pub fn copy_selected_action(&self, selected_action: usize) -> GlomEvent {
         self.actions[selected_action].clone()
     }
 
@@ -40,10 +40,10 @@ impl PipelineActionsPopupState {
             .iter()
             .map(|action| {
                 let action = match action {
-                    GlimEvent::JobOpenUrl(_, _, _) => "browse to failed job",
-                    GlimEvent::PipelineOpenUrl(_, _) => "browse to pipeline",
-                    GlimEvent::ProjectOpenUrl(_) => "browse to project",
-                    GlimEvent::JobLogFetch(_, _) => "download failed job log to clipboard",
+                    GlomEvent::JobOpenUrl(_, _, _) => "browse to failed job",
+                    GlomEvent::PipelineOpenUrl(_, _) => "browse to pipeline",
+                    GlomEvent::ProjectOpenUrl(_) => "browse to project",
+                    GlomEvent::JobLogFetch(_, _) => "download failed job log to clipboard",
                     _ => panic!("unsupported action"),
                 };
                 Line::from(action).style(theme().pipeline_action)

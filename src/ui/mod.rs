@@ -1,5 +1,5 @@
 use chrono::Duration;
-use compact_str::{format_compact, CompactString};
+use compact_str::{CompactString, format_compact};
 
 pub mod fx;
 pub mod popup;

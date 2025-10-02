@@ -1,7 +1,7 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Margin},
     prelude::{Direction, Rect},
-    Frame,
 };
 use tachyonfx::Duration;
 use tracing::debug;
@@ -9,18 +9,18 @@ use tracing::debug;
 use crate::{
     dispatcher::Dispatcher,
     effect_registry::EffectRegistry,
-    glim_app::GlimApp,
+    glom_app::GlomApp,
     theme::theme,
     ui::{
+        StatefulWidgets,
         popup::{ConfigPopup, PipelineActionsPopup, ProjectDetailsPopup},
         widget::{Notification, ProjectsTable},
-        StatefulWidgets,
     },
 };
 
 pub fn render_main_ui(
     f: &mut Frame,
-    app: &GlimApp,
+    app: &GlomApp,
     widget_states: &mut StatefulWidgets,
     effects: &mut EffectRegistry,
 ) {
@@ -43,7 +43,7 @@ pub fn render_main_ui(
 
 fn render_projects_table(
     f: &mut Frame,
-    app: &GlimApp,
+    app: &GlomApp,
     widget_states: &mut StatefulWidgets,
     area: Rect,
 ) {
@@ -110,7 +110,7 @@ fn render_config_popup(
     f.set_cursor_position(cursor);
 }
 
-fn handle_screen_capture(f: &mut Frame, app: &GlimApp, widget_states: &mut StatefulWidgets) {
+fn handle_screen_capture(f: &mut Frame, app: &GlomApp, widget_states: &mut StatefulWidgets) {
     widget_states.capture_screen_requested = false;
 
     debug!("Converting screen buffer to ANSI string using tachyonfx");
@@ -119,7 +119,7 @@ fn handle_screen_capture(f: &mut Frame, app: &GlimApp, widget_states: &mut State
     let ansi_output = tachyonfx::buffer_to_ansi_string(f.buffer_mut(), false);
 
     // Dispatch event to copy to clipboard since we can't access app's clipboard here
-    app.dispatch(crate::event::GlimEvent::ScreenCaptureToClipboard(
+    app.dispatch(crate::event::GlomEvent::ScreenCaptureToClipboard(
         ansi_output,
     ));
 }
