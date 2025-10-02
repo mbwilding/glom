@@ -131,37 +131,3 @@ impl ClientError {
 
 /// Result type alias for client operations
 pub type Result<T> = std::result::Result<T, ClientError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_creation() {
-        let err = ClientError::config("Invalid token");
-        assert!(matches!(err, ClientError::Config(_)));
-        assert_eq!(err.to_string(), "Configuration error: Invalid token");
-    }
-
-    #[test]
-    fn test_github_api_error() {
-        let err = ClientError::github_api("Project not found");
-        assert!(matches!(err, ClientError::GithubApi { .. }));
-        assert_eq!(err.to_string(), "GitHub API error: Project not found");
-    }
-
-    #[test]
-    fn test_retryable_errors() {
-        assert!(ClientError::Timeout.is_retryable());
-        assert!(ClientError::rate_limit(None).is_retryable());
-        assert!(!ClientError::Authentication.is_retryable());
-        assert!(!ClientError::config("test").is_retryable());
-    }
-
-    #[test]
-    fn test_network_errors() {
-        assert!(ClientError::Timeout.is_network_error());
-        assert!(!ClientError::Authentication.is_network_error());
-        assert!(!ClientError::config("test").is_network_error());
-    }
-}

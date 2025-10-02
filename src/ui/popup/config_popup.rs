@@ -263,7 +263,8 @@ impl StatefulWidget for ConfigPopup {
 
 fn url_description() -> Line<'static> {
     Line::from(vec![
-        Span::from("base url of the github instance, e.g. ").style(theme().input_description),
+        Span::from("base url ").style(theme().input_description_em),
+        Span::from("of the github, e.g. ").style(theme().input_description),
         Span::from("https://api.github.com").style(theme().input_description_em),
     ])
 }
@@ -278,8 +279,9 @@ fn token_description() -> Line<'static> {
 
 fn filter_description() -> Line<'static> {
     Line::from(vec![
-        Span::from("optional project filter, applied to project namespace")
-            .style(theme().input_description),
+        Span::from("optional filter").style(theme().input_description_em),
+        Span::from(", filters based on ").style(theme().input_description),
+        Span::from("namespace/repo_name").style(theme().input_description_em),
     ])
 }
 

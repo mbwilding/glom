@@ -294,9 +294,19 @@ impl StatefulWidgets {
 
     pub fn effective_filter(&self, config_filter: &Option<CompactString>) -> Option<CompactString> {
         // Temporary filter takes precedence over config filter
-        self.temporary_filter
+        let effective = self
+            .temporary_filter
             .clone()
-            .or_else(|| config_filter.clone())
+            .or_else(|| config_filter.clone());
+
+        tracing::debug!(
+            "Effective filter: temp={:?}, config={:?}, result={:?}",
+            self.temporary_filter,
+            config_filter,
+            effective
+        );
+
+        effective
     }
 
     pub fn update_filtered_indices(&mut self, indices: Vec<usize>) {

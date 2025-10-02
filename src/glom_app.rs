@@ -55,7 +55,9 @@ impl Default for GlomConfig {
     fn default() -> Self {
         Self {
             github_url: "https://api.github.com".into(),
-            github_token: "".into(),
+            github_token: std::env::var("GITHUB_TOKEN")
+                .unwrap_or_else(|_| String::new())
+                .into(),
             search_filter: None,
             log_level: Some("Error".into()),
             animations: true,
@@ -366,21 +368,35 @@ impl GlomApp {
             let mut filtered_projects = Vec::new();
             let mut filtered_indices = Vec::new();
 
+            tracing::debug!(
+                "Filtering {} projects with filter: '{}'",
+                all_projects.len(),
+                filter_lower
+            );
+
             for (index, project) in all_projects.iter().enumerate() {
-                if project
+                let path_matches = project
                     .path
                     .to_lowercase()
-                    .contains(filter_lower.as_str())
-                    || project
-                        .description
-                        .as_ref()
-                        .is_some_and(|d| d.to_lowercase().contains(filter_lower.as_str()))
-                {
+                    .contains(filter_lower.as_str());
+                let desc_matches = project
+                    .description
+                    .as_ref()
+                    .is_some_and(|d| d.to_lowercase().contains(filter_lower.as_str()));
+
+                if path_matches || desc_matches {
+                    tracing::debug!(
+                        "Project '{}' matches filter (path: {}, desc: {})",
+                        project.path,
+                        path_matches,
+                        desc_matches
+                    );
                     filtered_projects.push(project.clone());
                     filtered_indices.push(index);
                 }
             }
 
+            tracing::debug!("Filter result: {} projects match", filtered_projects.len());
             return (filtered_projects, filtered_indices);
         }
 

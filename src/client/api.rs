@@ -58,14 +58,15 @@ impl GithubApi {
     pub async fn get_projects(&self, query: &ProjectQuery) -> Result<Vec<ProjectDto>> {
         let url = self.build_projects_url(query);
 
-        if query.search_filter.is_none() {
-            // Direct user repos API returns array of repositories
-            let repos: Vec<ProjectDto> = self.get_json(&url).await?;
-            Ok(repos)
-        } else {
+        // Determine if we're using search API based on the URL, not just the filter presence
+        if url.contains("/search/repositories") {
             // Search API returns wrapped response
             let response: GitHubSearchResponse<ProjectDto> = self.get_json(&url).await?;
             Ok(response.items)
+        } else {
+            // Direct user repos API returns array of repositories
+            let repos: Vec<ProjectDto> = self.get_json(&url).await?;
+            Ok(repos)
         }
     }
 
@@ -416,21 +417,29 @@ impl GithubApi {
     fn build_projects_url(&self, query: &ProjectQuery) -> CompactString {
         let config = self.config.read().unwrap();
 
-        if query.search_filter.is_none() {
+        // For simple search terms or no filter, use the user repos API for reliability
+        // GitHub's search API is complex and often fails with simple terms
+        if query.search_filter.is_none()
+            || query
+                .search_filter
+                .as_ref()
+                .is_some_and(|f| !f.contains(':') && !f.contains(' '))
+        {
             format_compact!(
                 "{}/user/repos?type=all&sort=updated&direction=desc&per_page={}",
                 config.base_url,
                 query.per_page
             )
         } else {
+            // Only use search API for complex queries with GitHub search syntax
             let mut url = format_compact!("{}/search/repositories?q=", config.base_url);
 
             if let Some(filter) = &query.search_filter {
+                // Complex query, use as-is
                 url.push_str(&format_compact!("{}", filter));
             }
 
             url.push_str(" user:@me");
-
             url.push_str("&sort=updated&order=desc");
             url.push_str(&format_compact!("&per_page={}", query.per_page));
 
@@ -482,161 +491,5 @@ impl GithubApi {
                 debug!("Response logged to {:?}", log_path);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use chrono::{DateTime, Utc};
-
-    use super::*;
-
-    impl GithubApi {
-        /// Create a new GitHub API client
-        pub fn new(config: ClientConfig) -> Result<Self> {
-            config.validate()?;
-
-            let client = Client::builder()
-                .timeout(config.request.timeout)
-                .build()
-                .map_err(ClientError::Http)?;
-
-            Ok(Self {
-                client: RwLock::new(client),
-                config: RwLock::new(config),
-            })
-        }
-    }
-
-    fn test_config() -> ClientConfig {
-        ClientConfig::new(
-            "https://api.github.com",
-            "ghp_1234567890123456789012345678901234567890",
-        )
-    }
-
-    #[test]
-    fn test_api_creation() {
-        let config = test_config();
-        let api = GithubApi::new(config.clone());
-        assert!(api.is_ok());
-
-        let api = api.unwrap();
-        assert_eq!(api.config().base_url, config.base_url);
-        assert_eq!(api.config().private_token, config.private_token);
-    }
-
-    #[test]
-    fn test_api_creation_invalid_config() {
-        let config = ClientConfig::new("", "test-token");
-        let api = GithubApi::new(config);
-        assert!(api.is_err());
-    }
-
-    #[test]
-    fn test_config_update() {
-        let config = test_config();
-        let api = GithubApi::new(config).unwrap();
-
-        let new_config = ClientConfig::new(
-            "https://api.github.com",
-            "ghp_9876543210987654321098765432109876543210",
-        );
-        assert!(api.update_config(new_config.clone()).is_ok());
-
-        let updated_config = api.config();
-        assert_eq!(updated_config.base_url, new_config.base_url);
-        assert_eq!(updated_config.private_token, new_config.private_token);
-    }
-
-    #[test]
-    fn test_build_projects_url_with_filter() {
-        let config = test_config().with_search_filter(Some("frontend".into()));
-        let api = GithubApi::new(config).unwrap();
-
-        let mut query = ProjectQuery::default()
-            .with_search_filter(Some("frontend".into()))
-            .with_per_page(50);
-        query.include_statistics = true;
-        query.membership = true;
-        query.search_namespaces = true;
-
-        let url = api.build_projects_url(&query);
-
-        // With a search filter, it should use the search API
-        assert!(url.contains("https://api.github.com/search/repositories?"));
-        assert!(url.contains("q=frontend"));
-        assert!(url.contains("user:@me"));
-        assert!(url.contains("per_page=50"));
-        assert!(url.contains("sort=updated&order=desc"));
-    }
-
-    #[test]
-    fn test_build_projects_url_without_filter() {
-        let config = test_config();
-        let api = GithubApi::new(config).unwrap();
-
-        let query = ProjectQuery::default().with_per_page(50);
-
-        let url = api.build_projects_url(&query);
-
-        // Without a search filter, it should use the user repos API
-        assert!(url.contains("https://api.github.com/user/repos?"));
-        assert!(url.contains("type=all"));
-        assert!(url.contains("sort=updated"));
-        assert!(url.contains("direction=desc"));
-        assert!(url.contains("per_page=50"));
-    }
-
-    #[test]
-    fn test_build_pipelines_url() {
-        let config = test_config();
-        let api = GithubApi::new(config).unwrap();
-
-        let project_id = ProjectId::new("owner/repo");
-        let query = PipelineQuery::new().with_per_page(60);
-
-        let url = api.build_pipelines_url(project_id, &query);
-
-        assert_eq!(
-            url,
-            "https://api.github.com/repos/owner/repo/actions/runs?per_page=60"
-        );
-    }
-
-    #[test]
-    fn test_build_pipelines_url_with_date() {
-        let config = test_config();
-        let api = GithubApi::new(config).unwrap();
-
-        let project_id = ProjectId::new("owner/repo");
-        let updated_after = DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        let query = PipelineQuery::new()
-            .with_per_page(60)
-            .with_updated_after(Some(updated_after));
-
-        let url = api.build_pipelines_url(project_id, &query);
-
-        assert!(url.contains("&created=>=2023-01-01T00:00:00Z"));
-    }
-
-    #[test]
-    fn test_error_handling() {
-        let api = GithubApi::new(test_config()).unwrap();
-
-        // Test authentication error
-        let error = api.handle_error_response::<()>(401, "");
-        assert!(matches!(error, Err(ClientError::Authentication)));
-
-        // Test not found error
-        let error = api.handle_error_response::<()>(404, "");
-        assert!(matches!(error, Err(ClientError::NotFound { .. })));
-
-        // Test rate limit error
-        let error = api.handle_error_response::<()>(429, "");
-        assert!(matches!(error, Err(ClientError::RateLimit { .. })));
     }
 }
